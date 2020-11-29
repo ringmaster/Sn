@@ -5,7 +5,7 @@ Tin - a static website application written in Go
 
 ## Project Goals
 
-1. Accept the location of a configuration file from an environment variable.
+1. ~Accept the location of a configuration file from an environment variable.~
 2. Render and serve markdown files from a directory specified in the configuration file.
 3. Provide TLS encryption support with automatic cert updates from LetsEncrypt.
 4. Define URL navigation structure via config file, offering specific posts (filtered by characteristics) from different URL schemes.

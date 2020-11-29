@@ -84,7 +84,6 @@ func postHandler(routeMatch string, context map[string]interface{}) (string, err
 	fmt.Printf("Rendering template: %s\n", templatefilename)
 	context["posts"] = postsFromVars(context)
 	context["post"] = context["posts"].([]Post)[0]
-	fmt.Printf("%+v\n", context["post"])
 	rendered, err := renderTemplateFile(templatefilename, context)
 	if err != nil {
 		fmt.Printf("Error rendering template: %s\n", err)

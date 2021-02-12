@@ -26,7 +26,7 @@ type Post struct {
 	Slug       string
 	Repo       string
 	Categories []string
-	Authors    []int
+	Authors    []string
 	Date       time.Time
 	Raw        string
 	Html       string
@@ -82,8 +82,12 @@ func postHandler(routeMatch string, context map[string]interface{}) (string, err
 	layoutfilename := getTemplateFileFromConfig(fmt.Sprintf("%s.layout", routeMatch), "layout.html.hb")
 	templatefilename := getTemplateFileFromConfig(fmt.Sprintf("%s.template", routeMatch), "template.html.hb")
 	fmt.Printf("Rendering template: %s\n", templatefilename)
-	context["posts"] = postsFromVars(context)
-	context["post"] = context["posts"].([]Post)[0]
+	context["post"] = nil
+	if posts := postsFromVars(context); len(posts) > 0 {
+		context["posts"] = posts
+		context["post"] = posts[0]
+		context["postcount"] = len(posts)
+	}
 	rendered, err := renderTemplateFile(templatefilename, context)
 	if err != nil {
 		fmt.Printf("Error rendering template: %s\n", err)
@@ -109,6 +113,17 @@ func postsFromVars(context map[string]interface{}) []Post {
 		}
 		if raw != nil {
 			post := raw.(Post)
+			posts = append(posts, post)
+		}
+	}
+	if category, ok := pathvars["category"]; ok {
+		fmt.Printf("Searching for tag \"%s\"\n", category)
+		raw, err := txn.Get("post", "categories", category)
+		if err != nil {
+			panic(err)
+		}
+		for obj := raw.Next(); obj != nil; obj = raw.Next() {
+			post := obj.(Post)
 			posts = append(posts, post)
 		}
 	}
@@ -211,6 +226,21 @@ func makeDB() {
 						Unique:  false,
 						Indexer: &memdb.StringFieldIndex{Field: "Repo"},
 					},
+					"categories": {
+						Name:    "categories",
+						Unique:  false,
+						Indexer: &memdb.StringSliceFieldIndex{Field: "Categories"},
+					},
+					"authors": {
+						Name:    "authors",
+						Unique:  false,
+						Indexer: &memdb.StringSliceFieldIndex{Field: "Authors"},
+					},
+					"date": {
+						Name:    "date",
+						Unique:  false,
+						Indexer: &memdb.StringFieldIndex{Field: "Date"},
+					},
 				},
 			},
 		},
@@ -269,7 +299,26 @@ func loadPost(repoName string, filename string) {
 	}
 	post.Raw = body
 	post.Repo = repoName
-	post.Html = string(blackfriday.Run([]byte(body), blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.HardLineBreak)))
+
+	ishtml, ok := f["html"]
+	if ok && ishtml.(bool) {
+		post.Html = body
+	} else {
+		post.Html = string(blackfriday.Run([]byte(body), blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.HardLineBreak)))
+	}
+
+	arr := f["categories"].([]interface{})
+	categories := make([]string, len(arr))
+	for i, v := range arr {
+		categories[i] = fmt.Sprint(v)
+	}
+	post.Categories = categories
+	arr = f["authors"].([]interface{})
+	authors := make([]string, len(arr))
+	for i, v := range arr {
+		authors[i] = fmt.Sprint(v)
+	}
+	post.Authors = authors
 
 	txn := db.Txn(true)
 	txn.Insert("post", post)

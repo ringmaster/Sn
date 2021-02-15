@@ -373,6 +373,7 @@ func loadPost(repoName string, filename string) {
 	var post Post
 
 	file, err := os.Open(filename)
+	defer file.Close()
 	if err != nil {
 		panic(err)
 	}

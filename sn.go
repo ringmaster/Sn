@@ -352,6 +352,18 @@ func loadRepos() {
 }
 
 func loadRepo(repoName string) {
+	const bufferLen = 5000
+	postpaths := make(chan string, bufferLen)
+
+	const workers = 32
+	for w := 0; w < workers; w++ {
+		go func(id int, postpaths <-chan string) {
+			for path := range postpaths {
+				loadPost(repoName, path)
+			}
+		}(w, postpaths)
+	}
+
 	repoPath := path.Join(viper.GetString("path"), viper.GetString(fmt.Sprintf("repos.%s.path", repoName)))
 	err := filepath.Walk(repoPath, func(path string, info os.FileInfo, err error) error {
 		if info.IsDir() {
@@ -360,12 +372,14 @@ func loadRepo(repoName string) {
 		if filepath.Ext(path) != ".md" {
 			return nil
 		}
-		go loadPost(repoName, path)
+		postpaths <- path
+		// go loadPost(repoName, path)
 		return nil
 	})
 	if err != nil {
 		panic(err)
 	}
+	close(postpaths)
 	startWatching(repoPath, repoName)
 }
 

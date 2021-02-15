@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha1"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -9,15 +11,20 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/araddon/dateparse"
 	"github.com/aymerick/raymond"
 	"github.com/gernest/front"
 	"github.com/hashicorp/go-memdb"
+	"github.com/radovskyb/watcher"
 	"github.com/russross/blackfriday/v2"
 	"github.com/spf13/viper"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 // Post is...
@@ -28,6 +35,7 @@ type Post struct {
 	Categories []string
 	Authors    []string
 	Date       time.Time
+	RawDate    string
 	Raw        string
 	Html       string
 }
@@ -40,6 +48,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	var pathVars map[string]string
 	var output string
 	var staticfile string
+	var mime string
 
 	context = make(map[string]interface{}, 0)
 	context["config"] = viper.AllSettings()
@@ -65,7 +74,47 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			}
 			staticfile = path.Join(viper.GetString("path"), viper.GetString("template_path"), viper.GetString(fmt.Sprintf("%s.path", routeMatch)), staticfile)
 			fmt.Printf("Rendering static file: %s\n", staticfile)
-			http.ServeFile(w, r, staticfile)
+			f, err := os.Open(staticfile)
+			if f == nil || err != nil {
+				fmt.Printf("Could not open static file!\n")
+			} else {
+				// Read file into memory
+				fileBytes, err := ioutil.ReadAll(f)
+				if err != nil {
+					log.Println(err)
+					_, _ = fmt.Fprintf(w, "Error file bytes")
+					return
+				}
+
+				file, err := os.Stat(staticfile)
+
+				// Check mime
+				switch strings.ToLower(filepath.Ext(staticfile)) {
+				case ".css":
+					mime = "text/css"
+					break
+				default:
+					mime = http.DetectContentType(fileBytes)
+				}
+
+				h := sha1.New()
+				h.Write(fileBytes)
+				bs := h.Sum(nil)
+
+				// Custom headers
+				w.Header().Add("Content-Type", mime)
+
+				w.Header().Add("Cache-Control", "public, min-fresh=86400, max-age=31536000")
+				w.Header().Add("Content-Description", "File Transfer")
+				w.Header().Add("Pragma", "public")
+				w.Header().Add("Last-Modified", file.ModTime().String())
+				w.Header().Add("ETag", fmt.Sprintf("%x\n", bs))
+				w.Header().Add("Expires", "Fri, 1 Jan 3030 00:00:00 GMT")
+				w.Header().Add("Content-Length", strconv.Itoa(len(fileBytes)))
+				w.Write(fileBytes)
+				//fmt.Fprint(w, fileBytes)
+			}
+			//http.ServeFile(w, r, staticfile)
 			break
 		default:
 			fmt.Printf("Rendering default handler\n")
@@ -83,10 +132,10 @@ func postHandler(routeMatch string, context map[string]interface{}) (string, err
 	templatefilename := getTemplateFileFromConfig(fmt.Sprintf("%s.template", routeMatch), "template.html.hb")
 	fmt.Printf("Rendering template: %s\n", templatefilename)
 	context["post"] = nil
-	if posts := postsFromVars(context); len(posts) > 0 {
+	if posts, postcount := postsFromVars(context); len(posts) > 0 {
 		context["posts"] = posts
 		context["post"] = posts[0]
-		context["postcount"] = len(posts)
+		context["postcount"] = postcount
 	}
 	rendered, err := renderTemplateFile(templatefilename, context)
 	if err != nil {
@@ -97,8 +146,23 @@ func postHandler(routeMatch string, context map[string]interface{}) (string, err
 	return renderTemplateFile(layoutfilename, context)
 }
 
-func postsFromVars(context map[string]interface{}) []Post {
+func MinOf(vars ...int) int {
+	min := vars[0]
+
+	for _, i := range vars {
+		if min > i {
+			min = i
+		}
+	}
+
+	return min
+}
+
+func postsFromVars(context map[string]interface{}) ([]Post, int) {
 	var posts []Post
+
+	searchComplete := false
+
 	posts = make([]Post, 0)
 	pathvars := context["pathvars"].(map[string]string)
 	fmt.Printf("Pathvars: %+v\n", pathvars)
@@ -115,6 +179,7 @@ func postsFromVars(context map[string]interface{}) []Post {
 			post := raw.(Post)
 			posts = append(posts, post)
 		}
+		searchComplete = true
 	}
 	if category, ok := pathvars["category"]; ok {
 		fmt.Printf("Searching for tag \"%s\"\n", category)
@@ -126,8 +191,35 @@ func postsFromVars(context map[string]interface{}) []Post {
 			post := obj.(Post)
 			posts = append(posts, post)
 		}
+		searchComplete = true
 	}
-	return posts
+
+	if !searchComplete {
+		fmt.Printf("Returning all posts\n")
+		raw, err := txn.Get("post", "id")
+		if err != nil {
+			panic(err)
+		}
+		for obj := raw.Next(); obj != nil; obj = raw.Next() {
+			post := obj.(Post)
+			posts = append(posts, post)
+		}
+		searchComplete = true
+	}
+
+	sort.SliceStable(posts, func(i, j int) bool { return posts[i].Date.After(posts[j].Date) })
+
+	front := 0
+	back := 5
+
+	if page, ok := pathvars["page"]; ok {
+		pg, _ := strconv.Atoi(page)
+		front = (pg - 1) * 5
+		back = front + 5
+	}
+	back = MinOf(len(posts), back)
+
+	return posts[front:back], len(posts)
 }
 
 func getTemplateFileFromConfig(configPath string, alternative string) string {
@@ -143,6 +235,7 @@ func renderTemplateFile(filename string, context map[string]interface{}) (string
 	if err != nil {
 		return string(file), err
 	}
+
 	return raymond.Render(string(file), context)
 }
 
@@ -273,6 +366,7 @@ func loadRepo(repoName string) {
 	if err != nil {
 		panic(err)
 	}
+	startWatching(repoPath, repoName)
 }
 
 func loadPost(repoName string, filename string) {
@@ -320,17 +414,89 @@ func loadPost(repoName string, filename string) {
 	}
 	post.Authors = authors
 
+	post.RawDate = f["date"].(string)
+	post.Date, err = dateparse.ParseLocal(post.RawDate)
+
 	txn := db.Txn(true)
 	txn.Insert("post", post)
 	txn.Commit()
+}
+
+func startWatching(path string, repoName string) {
+	fmt.Printf("Starting recursive watch of %s repo: %s\n", repoName, path)
+	w := watcher.New()
+	w.SetMaxEvents(1)
+	w.FilterOps(watcher.Create, watcher.Write)
+	r := regexp.MustCompile(".md$")
+	w.AddFilterHook(watcher.RegexFilterHook(r, false))
+
+	go func() {
+		for {
+			select {
+			case event := <-w.Event:
+				fmt.Println(event) // Print the event's info.
+				loadPost(repoName, event.Path)
+			case err := <-w.Error:
+				log.Fatalln(err)
+			case <-w.Closed:
+				return
+			}
+		}
+	}()
+
+	if err := w.AddRecursive(path); err != nil {
+		log.Fatalln(err)
+	}
+
+	/*
+		for path, f := range w.WatchedFiles() {
+			fmt.Printf("%s: %s\n", path, f.Name())
+		}
+	*/
+
+	go func() {
+		if err := w.Start(time.Millisecond * 100); err != nil {
+			log.Fatalln(err)
+		}
+	}()
+
+	fmt.Printf("Started recursive watch of %s repo\n", repoName)
+}
+
+func registerTemplateHelpers() {
+	raymond.RegisterHelper("dateformat", func(t time.Time, format string) string {
+		return t.Format(format)
+	})
 }
 
 func main() {
 	setupConfig()
 	makeDB()
 	loadRepos()
+	registerTemplateHelpers()
 
 	http.HandleFunc("/", handler)
-	fmt.Printf("Starting server on localhost:%d\n", viper.GetInt("port"))
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", viper.GetInt("port")), nil))
+
+	if viper.IsSet("ssldomain") {
+		certManager := autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(viper.GetString("ssldomain")), //Your domain here
+			Cache:      autocert.DirCache("certs"),                           //Folder for storing certificates
+		}
+
+		server := &http.Server{
+			Addr: ":https",
+			TLSConfig: &tls.Config{
+				GetCertificate: certManager.GetCertificate,
+			},
+		}
+
+		go http.ListenAndServe(":http", certManager.HTTPHandler(nil))
+		fmt.Printf("Starting TLS HTTPS server on localhost, and HTTP server for LetsEncrypt.\n")
+		log.Fatal(server.ListenAndServeTLS("", ""))
+	} else {
+		fmt.Printf("Starting HTTP server on localhost:%d\n", viper.GetInt("port"))
+		log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", viper.GetInt("port")), nil))
+	}
+
 }

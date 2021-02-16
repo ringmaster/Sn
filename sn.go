@@ -492,11 +492,11 @@ func main() {
 
 	http.HandleFunc("/", handler)
 
-	if viper.IsSet("ssldomain") {
+	if viper.IsSet("ssldomains") {
 		certManager := autocert.Manager{
 			Prompt:     autocert.AcceptTOS,
-			HostPolicy: autocert.HostWhitelist(viper.GetString("ssldomain")), //Your domain here
-			Cache:      autocert.DirCache("certs"),                           //Folder for storing certificates
+			HostPolicy: autocert.HostWhitelist(viper.GetStringSlice("ssldomains")...), //Your domain here
+			Cache:      autocert.DirCache("certs"),                                    //Folder for storing certificates
 		}
 
 		server := &http.Server{

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -17,7 +19,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/araddon/dateparse"
+	"github.com/arpitgogia/rake"
 	"github.com/aymerick/raymond"
 	"github.com/gernest/front"
 	"github.com/hashicorp/go-memdb"
@@ -40,6 +44,16 @@ type Post struct {
 	Html       string
 }
 
+type Category struct {
+	Name  string
+	Count int
+}
+
+type Author struct {
+	Name  string
+	Count int
+}
+
 var db *memdb.MemDB
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +71,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	routeMatch, pathVars, err := getMatchingRoute(r.URL.Path)
 	context["pathvars"] = pathVars
+	context["params"] = r.URL.Query()
+
 	if err != nil {
 		fmt.Printf("Rendering 404\n")
 		// This should render a 404 if we know how
@@ -132,10 +148,12 @@ func postHandler(routeMatch string, context map[string]interface{}) (string, err
 	templatefilename := getTemplateFileFromConfig(fmt.Sprintf("%s.template", routeMatch), "template.html.hb")
 	fmt.Printf("Rendering template: %s\n", templatefilename)
 	context["post"] = nil
-	if posts, postcount := postsFromVars(context); len(posts) > 0 {
+	if posts, postcount, pages, curPage := postsFromVars(context); len(posts) > 0 {
 		context["posts"] = posts
 		context["post"] = posts[0]
 		context["postcount"] = postcount
+		context["pages"] = pages
+		context["curpage"] = curPage
 	}
 	rendered, err := renderTemplateFile(templatefilename, context)
 	if err != nil {
@@ -158,8 +176,9 @@ func MinOf(vars ...int) int {
 	return min
 }
 
-func postsFromVars(context map[string]interface{}) ([]Post, int) {
+func postsFromVars(context map[string]interface{}) ([]Post, int, int, int) {
 	var posts []Post
+	var pg int
 
 	searchComplete := false
 
@@ -209,17 +228,19 @@ func postsFromVars(context map[string]interface{}) ([]Post, int) {
 
 	sort.SliceStable(posts, func(i, j int) bool { return posts[i].Date.After(posts[j].Date) })
 
-	front := 0
-	back := 5
-
-	if page, ok := pathvars["page"]; ok {
-		pg, _ := strconv.Atoi(page)
-		front = (pg - 1) * 5
-		back = front + 5
+	perPage := 5
+	pg = 1
+	if page, ok := context["params"].(url.Values)["page"]; ok {
+		pg, _ = strconv.Atoi(page[0])
 	}
+	if page, ok := pathvars["page"]; ok {
+		pg, _ = strconv.Atoi(page)
+	}
+	front := (pg - 1) * perPage
+	back := front + perPage
 	back = MinOf(len(posts), back)
 
-	return posts[front:back], len(posts)
+	return posts[front:back], len(posts), int(math.Ceil(float64(len(posts)) / float64(perPage))), pg
 }
 
 func getTemplateFileFromConfig(configPath string, alternative string) string {
@@ -336,6 +357,26 @@ func makeDB() {
 					},
 				},
 			},
+			"category": {
+				Name: "category",
+				Indexes: map[string]*memdb.IndexSchema{
+					"id": {
+						Name:    "id",
+						Unique:  true,
+						Indexer: &memdb.StringFieldIndex{Field: "Name"},
+					},
+				},
+			},
+			"author": {
+				Name: "author",
+				Indexes: map[string]*memdb.IndexSchema{
+					"id": {
+						Name:    "id",
+						Unique:  true,
+						Indexer: &memdb.StringFieldIndex{Field: "Name"},
+					},
+				},
+			},
 		},
 	}
 
@@ -420,7 +461,30 @@ func loadPost(repoName string, filename string) {
 	categories := make([]string, len(arr))
 	for i, v := range arr {
 		categories[i] = fmt.Sprint(v)
+
+		category := new(Category)
+		category.Name = fmt.Sprint(v)
+		category.Count = 1
 	}
+
+	if viper.IsSet("rake_minimum") {
+		rakes := rake.WithText(body)
+		keys := make([]string, 0, len(rakes))
+		for k := range rakes {
+			if rakes[k] > viper.GetFloat64("rake_minimum") {
+				keys = append(keys, k)
+			}
+		}
+		sort.SliceStable(keys, func(i, j int) bool { return rakes[keys[i]] > rakes[keys[j]] })
+		categories = append(categories, keys...)
+	}
+
+	for category := range categories {
+		txn := db.Txn(true)
+		txn.Insert("categories", category)
+		txn.Commit()
+	}
+
 	post.Categories = categories
 	arr = f["authors"].([]interface{})
 	authors := make([]string, len(arr))
@@ -463,12 +527,6 @@ func startWatching(path string, repoName string) {
 		log.Fatalln(err)
 	}
 
-	/*
-		for path, f := range w.WatchedFiles() {
-			fmt.Printf("%s: %s\n", path, f.Name())
-		}
-	*/
-
 	go func() {
 		if err := w.Start(time.Millisecond * 100); err != nil {
 			log.Fatalln(err)
@@ -481,6 +539,39 @@ func startWatching(path string, repoName string) {
 func registerTemplateHelpers() {
 	raymond.RegisterHelper("dateformat", func(t time.Time, format string) string {
 		return t.Format(format)
+	})
+	raymond.RegisterHelper("more", func(html string, pcount int, options *raymond.Options) string {
+		more := ""
+		re := regexp.MustCompile("<!--\\s*more\\s*-->")
+		split := re.Split(html, -1)
+		if len(split) > 1 {
+			return split[0] + options.Fn()
+		}
+
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+		if err != nil {
+			return "<p>NewDocument() error</p>" + html
+		}
+
+		doc.Find("p").EachWithBreak(func(i int, sel *goquery.Selection) bool {
+			tp, err := goquery.OuterHtml(sel)
+			fmt.Printf("Sel:\n%#v\n---\n%#v\n", tp, sel)
+			if err == nil {
+				if sel.Text() != "" {
+					more = more + tp
+					pcount--
+				}
+			}
+			if pcount <= 0 {
+				return false
+			}
+			return true
+		})
+
+		return more + options.Fn()
+	})
+	raymond.RegisterHelper("paginate", func(context interface{}, options *raymond.Options) string {
+		return options.FnWith(context)
 	})
 }
 

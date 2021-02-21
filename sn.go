@@ -157,9 +157,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func gitHandler(routeMatch string, context map[string]interface{}) (string, map[string]interface{}) {
+	var remote string
 	fmt.Printf("Rendering git handler\n")
 
 	path := viper.GetString(fmt.Sprintf("%s.path", routeMatch))
+	if viper.IsSet(fmt.Sprintf("%s.remote", routeMatch)) {
+		remote = viper.GetString(fmt.Sprintf("%s.remote", routeMatch))
+	} else {
+		remote = "origin"
+	}
 
 	r, err := git.PlainOpen(path)
 	if err != nil {
@@ -169,7 +175,7 @@ func gitHandler(routeMatch string, context map[string]interface{}) (string, map[
 	if err != nil {
 		fmt.Printf("%v#\n", err)
 	}
-	err = w.Pull(&git.PullOptions{RemoteName: "origin"})
+	err = w.Pull(&git.PullOptions{RemoteName: remote})
 	if err != nil {
 		fmt.Printf("%v#\n", err)
 	}

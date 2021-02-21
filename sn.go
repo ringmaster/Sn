@@ -161,9 +161,18 @@ func gitHandler(routeMatch string, context map[string]interface{}) (string, map[
 
 	path := viper.GetString(fmt.Sprintf("%s.path", routeMatch))
 
-	r, _ := git.PlainOpen(path)
-	w, _ := r.Worktree()
-	w.Pull(&git.PullOptions{RemoteName: "origin"})
+	r, err := git.PlainOpen(path)
+	if err != nil {
+		fmt.Printf("%v#\n", err)
+	}
+	w, err := r.Worktree()
+	if err != nil {
+		fmt.Printf("%v#\n", err)
+	}
+	err = w.Pull(&git.PullOptions{RemoteName: "origin"})
+	if err != nil {
+		fmt.Printf("%v#\n", err)
+	}
 
 	ref, _ := r.Head()
 	commit, _ := r.CommitObject(ref.Hash())

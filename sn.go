@@ -31,8 +31,8 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
-// Post is...
-type Post struct {
+// Item is...
+type Item struct {
 	Title      string
 	Slug       string
 	Repo       string
@@ -42,6 +42,14 @@ type Post struct {
 	RawDate    string
 	Raw        string
 	Html       string
+}
+
+type ItemResult struct {
+	Items    []Item
+	Total    int
+	Paginate int
+	Pages    int
+	Page     int
 }
 
 type Category struct {
@@ -80,7 +88,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Matched Route: %s\n", routeMatch)
 		switch viper.GetString(fmt.Sprintf("%s.handler", routeMatch)) {
 		case "posts":
-			output, err = postHandler(routeMatch, context)
+			output, _ := postHandler(routeMatch, context)
+			// May use context here to set additional headers, as defined by the handler
 			fmt.Fprint(w, output)
 			break
 		case "static":
@@ -142,26 +151,36 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func postHandler(routeMatch string, context map[string]interface{}) (string, error) {
+func postHandler(routeMatch string, context map[string]interface{}) (string, map[string]interface{}) {
 	fmt.Printf("Rendering posts handler\n")
 	layoutfilename := getTemplateFileFromConfig(fmt.Sprintf("%s.layout", routeMatch), "layout.html.hb")
 	templatefilename := getTemplateFileFromConfig(fmt.Sprintf("%s.template", routeMatch), "template.html.hb")
 	fmt.Printf("Rendering template: %s\n", templatefilename)
 	context["post"] = nil
-	if posts, postcount, pages, curPage := postsFromVars(context); len(posts) > 0 {
-		context["posts"] = posts
-		context["post"] = posts[0]
-		context["postcount"] = postcount
-		context["pages"] = pages
-		context["curpage"] = curPage
+	if itemResult := itemsFromVars(context); len(itemResult.Items) > 0 {
+		context["posts"] = itemResult.Items
+		context["post"] = itemResult.Items[0]
+		context["postcount"] = itemResult.Total
+		context["pages"] = itemResult.Pages
+		context["curpage"] = itemResult.Page
 	}
 	rendered, err := renderTemplateFile(templatefilename, context)
 	if err != nil {
 		fmt.Printf("Error rendering template: %s\n", err)
+		context["content"] = fmt.Sprintf("<div class=\"notification is-danger\">Error rendering template: %s</div>\n", err)
+	} else {
+		context["content"] = rendered
 	}
-	context["content"] = rendered
 	fmt.Printf("Rendering layout: %s\n", layoutfilename)
-	return renderTemplateFile(layoutfilename, context)
+
+	layoutRendered, err := renderTemplateFile(layoutfilename, context)
+	if err != nil {
+		fmt.Printf("Error rendering layout: %s\n", err)
+		context["content"] = fmt.Sprintf("<div class=\"notification is-danger\">Error rendering layout: %s</div>\n", err)
+		layoutRendered = "<html>" + context["content"].(string) + "</html>"
+	}
+
+	return layoutRendered, context
 }
 
 func MinOf(vars ...int) int {
@@ -176,13 +195,13 @@ func MinOf(vars ...int) int {
 	return min
 }
 
-func postsFromVars(context map[string]interface{}) ([]Post, int, int, int) {
-	var posts []Post
+func itemsFromVars(context map[string]interface{}) ItemResult {
+	var items []Item
 	var pg int
 
 	searchComplete := false
 
-	posts = make([]Post, 0)
+	items = make([]Item, 0)
 	pathvars := context["pathvars"].(map[string]string)
 	fmt.Printf("Pathvars: %+v\n", pathvars)
 
@@ -190,43 +209,43 @@ func postsFromVars(context map[string]interface{}) ([]Post, int, int, int) {
 	defer txn.Abort()
 	if slug, ok := pathvars["slug"]; ok {
 		fmt.Printf("Searching for slug \"%s\"\n", slug)
-		raw, err := txn.First("post", "id", slug)
+		raw, err := txn.First("items", "id", slug)
 		if err != nil {
 			panic(err)
 		}
 		if raw != nil {
-			post := raw.(Post)
-			posts = append(posts, post)
+			item := raw.(Item)
+			items = append(items, item)
 		}
 		searchComplete = true
 	}
 	if category, ok := pathvars["category"]; ok {
 		fmt.Printf("Searching for tag \"%s\"\n", category)
-		raw, err := txn.Get("post", "categories", category)
+		raw, err := txn.Get("items", "categories", category)
 		if err != nil {
 			panic(err)
 		}
 		for obj := raw.Next(); obj != nil; obj = raw.Next() {
-			post := obj.(Post)
-			posts = append(posts, post)
+			item := obj.(Item)
+			items = append(items, item)
 		}
 		searchComplete = true
 	}
 
 	if !searchComplete {
-		fmt.Printf("Returning all posts\n")
-		raw, err := txn.Get("post", "id")
+		fmt.Printf("Returning all items\n")
+		raw, err := txn.Get("items", "id")
 		if err != nil {
 			panic(err)
 		}
 		for obj := raw.Next(); obj != nil; obj = raw.Next() {
-			post := obj.(Post)
-			posts = append(posts, post)
+			item := obj.(Item)
+			items = append(items, item)
 		}
 		searchComplete = true
 	}
 
-	sort.SliceStable(posts, func(i, j int) bool { return posts[i].Date.After(posts[j].Date) })
+	sort.SliceStable(items, func(i, j int) bool { return items[i].Date.After(items[j].Date) })
 
 	perPage := 5
 	pg = 1
@@ -238,9 +257,9 @@ func postsFromVars(context map[string]interface{}) ([]Post, int, int, int) {
 	}
 	front := (pg - 1) * perPage
 	back := front + perPage
-	back = MinOf(len(posts), back)
+	back = MinOf(len(items), back)
 
-	return posts[front:back], len(posts), int(math.Ceil(float64(len(posts)) / float64(perPage))), pg
+	return ItemResult{Items: items[front:back], Total: len(items), Pages: int(math.Ceil(float64(len(items)) / float64(perPage))), Page: pg}
 }
 
 func getTemplateFileFromConfig(configPath string, alternative string) string {
@@ -327,8 +346,8 @@ func makeDB() {
 
 	schema := &memdb.DBSchema{
 		Tables: map[string]*memdb.TableSchema{
-			"post": {
-				Name: "post",
+			"items": {
+				Name: "items",
 				Indexes: map[string]*memdb.IndexSchema{
 					"id": {
 						Name:    "id",
@@ -394,15 +413,15 @@ func loadRepos() {
 
 func loadRepo(repoName string) {
 	const bufferLen = 5000
-	postpaths := make(chan string, bufferLen)
+	itempaths := make(chan string, bufferLen)
 
 	const workers = 32
 	for w := 0; w < workers; w++ {
-		go func(id int, postpaths <-chan string) {
-			for path := range postpaths {
-				loadPost(repoName, path)
+		go func(id int, itempaths <-chan string) {
+			for path := range itempaths {
+				loadItem(repoName, path)
 			}
-		}(w, postpaths)
+		}(w, itempaths)
 	}
 
 	repoPath := path.Join(viper.GetString("path"), viper.GetString(fmt.Sprintf("repos.%s.path", repoName)))
@@ -413,19 +432,18 @@ func loadRepo(repoName string) {
 		if filepath.Ext(path) != ".md" {
 			return nil
 		}
-		postpaths <- path
-		// go loadPost(repoName, path)
+		itempaths <- path
 		return nil
 	})
 	if err != nil {
 		panic(err)
 	}
-	close(postpaths)
+	close(itempaths)
 	startWatching(repoPath, repoName)
 }
 
-func loadPost(repoName string, filename string) {
-	var post Post
+func loadItem(repoName string, filename string) {
+	var item Item
 
 	file, err := os.Open(filename)
 	defer file.Close()
@@ -441,20 +459,20 @@ func loadPost(repoName string, filename string) {
 		panic(err)
 	}
 
-	post.Title = f["title"].(string)
+	item.Title = f["title"].(string)
 	if val, ok := f["slug"]; ok {
-		post.Slug = fmt.Sprintf("%v", val)
+		item.Slug = fmt.Sprintf("%v", val)
 	} else {
-		post.Slug = path.Base(filename)
+		item.Slug = path.Base(filename)
 	}
-	post.Raw = body
-	post.Repo = repoName
+	item.Raw = body
+	item.Repo = repoName
 
 	ishtml, ok := f["html"]
 	if ok && ishtml.(bool) {
-		post.Html = body
+		item.Html = body
 	} else {
-		post.Html = string(blackfriday.Run([]byte(body), blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.HardLineBreak)))
+		item.Html = string(blackfriday.Run([]byte(body), blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.HardLineBreak)))
 	}
 
 	arr := f["categories"].([]interface{})
@@ -485,19 +503,19 @@ func loadPost(repoName string, filename string) {
 		txn.Commit()
 	}
 
-	post.Categories = categories
+	item.Categories = categories
 	arr = f["authors"].([]interface{})
 	authors := make([]string, len(arr))
 	for i, v := range arr {
 		authors[i] = fmt.Sprint(v)
 	}
-	post.Authors = authors
+	item.Authors = authors
 
-	post.RawDate = f["date"].(string)
-	post.Date, err = dateparse.ParseLocal(post.RawDate)
+	item.RawDate = f["date"].(string)
+	item.Date, err = dateparse.ParseLocal(item.RawDate)
 
 	txn := db.Txn(true)
-	txn.Insert("post", post)
+	txn.Insert("items", item)
 	txn.Commit()
 }
 
@@ -514,7 +532,7 @@ func startWatching(path string, repoName string) {
 			select {
 			case event := <-w.Event:
 				fmt.Println(event) // Print the event's info.
-				loadPost(repoName, event.Path)
+				loadItem(repoName, event.Path)
 			case err := <-w.Error:
 				log.Fatalln(err)
 			case <-w.Closed:
@@ -555,7 +573,6 @@ func registerTemplateHelpers() {
 
 		doc.Find("p").EachWithBreak(func(i int, sel *goquery.Selection) bool {
 			tp, err := goquery.OuterHtml(sel)
-			fmt.Printf("Sel:\n%#v\n---\n%#v\n", tp, sel)
 			if err == nil {
 				if sel.Text() != "" {
 					more = more + tp
@@ -570,7 +587,7 @@ func registerTemplateHelpers() {
 
 		return more + options.Fn()
 	})
-	raymond.RegisterHelper("paginate", func(context interface{}, options *raymond.Options) string {
+	raymond.RegisterHelper("paginate", func(context interface{}, paragraphs int, options *raymond.Options) string {
 		return options.FnWith(context)
 	})
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/arpitgogia/rake"
 	"github.com/aymerick/raymond"
 	"github.com/gernest/front"
+	"github.com/go-git/go-git/v5"
 	"github.com/hashicorp/go-memdb"
 	"github.com/radovskyb/watcher"
 	"github.com/russross/blackfriday/v2"
@@ -141,6 +142,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			}
 			//http.ServeFile(w, r, staticfile)
 			break
+		case "git":
+			output, _ := gitHandler(routeMatch, context)
+			fmt.Fprint(w, output)
+			break
 		default:
 			fmt.Printf("Rendering default handler\n")
 			layoutfilename = path.Join(viper.GetString("path"), viper.GetString("template_path"), "layout.html.hb")
@@ -149,6 +154,22 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, output)
 		}
 	}
+}
+
+func gitHandler(routeMatch string, context map[string]interface{}) (string, map[string]interface{}) {
+	fmt.Printf("Rendering git handler\n")
+
+	path := viper.GetString(fmt.Sprintf("%s.path", routeMatch))
+
+	r, _ := git.PlainOpen(path)
+	w, _ := r.Worktree()
+	w.Pull(&git.PullOptions{RemoteName: "origin"})
+
+	ref, _ := r.Head()
+	commit, _ := r.CommitObject(ref.Hash())
+	fmt.Printf("Current commit hash on %s: %s\n%#s\n", path, ref.Hash(), commit)
+
+	return commit.Hash.String() + ": " + commit.Message, context
 }
 
 func postHandler(routeMatch string, context map[string]interface{}) (string, map[string]interface{}) {

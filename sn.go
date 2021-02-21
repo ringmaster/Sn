@@ -176,7 +176,7 @@ func gitHandler(routeMatch string, context map[string]interface{}) (string, map[
 
 	ref, _ := r.Head()
 	commit, _ := r.CommitObject(ref.Hash())
-	fmt.Printf("Current commit hash on %s: %s\n%#s\n", path, ref.Hash(), commit)
+	fmt.Printf("Current commit hash on %s: %s\n%s\n", path, ref.Hash(), commit)
 
 	return commit.Hash.String() + ": " + commit.Message, context
 }

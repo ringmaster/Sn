@@ -548,8 +548,7 @@ func loadItem(repoName string, filename string) {
 	item.Authors = authors
 
 	item.RawDate = f["date"].(string)
-	dateformat, err := dateparse.ParseFormat("2006-01-02")
-	item.Date, err = time.Parse(dateformat, item.RawDate)
+	item.Date, err = dateparse.ParseLocal(item.RawDate)
 
 	txn := db.Txn(true)
 	txn.Insert("items", item)

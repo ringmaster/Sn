@@ -91,7 +91,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		case "posts":
 			output, _ := postHandler(routeMatch, context)
 			// May use context here to set additional headers, as defined by the handler
-			fmt.Fprint(w, output)
+			w.Header().Add("Content-Type", "text/html")
+			w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			w.Header().Add("X-Frame-Options", "SAMEORIGIN")
+			w.Header().Add("X-Content-Type-Options", "nosniff")
+			w.Header().Add("Upgrade-Insecure-Requests", "1")
+			w.Header().Add("Referrer-Policy", "origin")
+			w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
+			w.Write([]byte(output))
 			break
 		case "static":
 			staticfile = viper.GetString(fmt.Sprintf("%s.file", routeMatch))
@@ -151,7 +158,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			layoutfilename = path.Join(viper.GetString("path"), viper.GetString("template_path"), "layout.html.hb")
 			fmt.Printf("Rendering layout: %s\n", layoutfilename)
 			output, _ = renderTemplateFile(layoutfilename, context)
-			fmt.Fprint(w, output)
+
+			w.Header().Add("Content-Type", "text/html")
+			w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			w.Header().Add("X-Frame-Options", "SAMEORIGIN")
+			w.Header().Add("X-Content-Type-Options", "nosniff")
+			w.Header().Add("Upgrade-Insecure-Requests", "1")
+			w.Header().Add("Referrer-Policy", "origin")
+			w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
+			w.Write([]byte(output))
 		}
 	}
 }

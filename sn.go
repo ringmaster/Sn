@@ -96,7 +96,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add("X-Frame-Options", "SAMEORIGIN")
 			w.Header().Add("X-Content-Type-Options", "nosniff")
 			w.Header().Add("Upgrade-Insecure-Requests", "1")
-			w.Header().Add("Referrer-Policy", "origin")
+			w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
 			w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
 			w.Write([]byte(output))
 			break
@@ -164,7 +164,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add("X-Frame-Options", "SAMEORIGIN")
 			w.Header().Add("X-Content-Type-Options", "nosniff")
 			w.Header().Add("Upgrade-Insecure-Requests", "1")
-			w.Header().Add("Referrer-Policy", "origin")
+			w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
 			w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
 			w.Write([]byte(output))
 		}

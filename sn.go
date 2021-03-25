@@ -562,7 +562,11 @@ func loadRepos() {
 	bmap.AddDocumentMapping("item", itemMapping)
 	bmap.DefaultType = "item"
 
-	index, _ = bleve.NewMemOnly(bmap)
+	if viper.IsSet("filedb") {
+		index, _ = bleve.New(viper.GetString("filedb"), bmap)
+	} else {
+		index, _ = bleve.NewMemOnly(bmap)
+	}
 
 	for repo, _ := range viper.GetStringMap("repos") {
 		loadRepo(repo)

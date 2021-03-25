@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"crypto/tls"
 	"errors"
@@ -17,12 +18,16 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/araddon/dateparse"
 	"github.com/arpitgogia/rake"
 	"github.com/aymerick/raymond"
+	"github.com/blevesearch/bleve/v2"
+	"github.com/blevesearch/bleve/v2/analysis/analyzer/keyword"
+	"github.com/blevesearch/bleve/v2/mapping"
 	"github.com/gernest/front"
 	"github.com/go-git/go-git/v5"
 	"github.com/hashicorp/go-memdb"
@@ -64,6 +69,9 @@ type Author struct {
 }
 
 var db *memdb.MemDB
+
+var bmap mapping.IndexMappingImpl
+var index bleve.Index
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	var context map[string]interface{}
@@ -144,6 +152,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				w.Header().Add("ETag", fmt.Sprintf("%x\n", bs))
 				w.Header().Add("Expires", "Fri, 1 Jan 3030 00:00:00 GMT")
 				w.Header().Add("Content-Length", strconv.Itoa(len(fileBytes)))
+				w.Header().Add("Access-Control-Allow-Origin", r.Host)
 				w.Write(fileBytes)
 				//fmt.Fprint(w, fileBytes)
 			}
@@ -208,13 +217,25 @@ func postHandler(routeMatch string, context map[string]interface{}) (string, map
 	templatefilename := getTemplateFileFromConfig(fmt.Sprintf("%s.template", routeMatch), "template.html.hb")
 	fmt.Printf("Rendering template: %s\n", templatefilename)
 	context["post"] = nil
-	if itemResult := itemsFromVars(context); len(itemResult.Items) > 0 {
-		context["posts"] = itemResult.Items
-		context["post"] = itemResult.Items[0]
-		context["postcount"] = itemResult.Total
-		context["pages"] = itemResult.Pages
-		context["curpage"] = itemResult.Page
+
+	pathvars := context["pathvars"].(map[string]string)
+	fmt.Printf("Pathvars: %+v\n", pathvars)
+
+	// Find the itemquery instances, loop over, assign results to context
+	for name, value := range viper.GetStringMap(fmt.Sprintf("%s", routeMatch)) {
+		if _, is_map := value.(map[string]interface{}); is_map {
+			query := viper.GetString(fmt.Sprintf("%s.%s.query", routeMatch, name))
+			queryTemplate := template.Must(template.New("").Parse(query))
+			buf := bytes.Buffer{}
+			queryTemplate.Execute(&buf, pathvars)
+			var renderedQuery string = buf.String()
+			fmt.Printf("Rendered Query: %#v\n", renderedQuery)
+			itemResult := itemsFromQuery(renderedQuery, context)
+
+			context[name] = itemResult
+		}
 	}
+
 	rendered, err := renderTemplateFile(templatefilename, context)
 	if err != nil {
 		fmt.Printf("Error rendering template: %s\n", err)
@@ -244,6 +265,55 @@ func MinOf(vars ...int) int {
 	}
 
 	return min
+}
+
+func itemsFromQuery(query string, context map[string]interface{}) ItemResult {
+	var items []Item
+	var pg int
+
+	items = make([]Item, 0)
+
+	txn := db.Txn(false)
+	defer txn.Abort()
+
+	pathvars := context["pathvars"].(map[string]string)
+	perPage := 5
+	pg = 1
+	if page, ok := context["params"].(url.Values)["page"]; ok {
+		pg, _ = strconv.Atoi(page[0])
+	}
+	if page, ok := pathvars["page"]; ok {
+		pg, _ = strconv.Atoi(page)
+	}
+	front := (pg - 1) * perPage
+
+	fmt.Printf("Bleve search \"%s\"\n", query)
+	search := bleve.NewQueryStringQuery(query)
+	searchRequest := bleve.NewSearchRequest(search)
+	searchRequest.SortBy([]string{"-Date"})
+	searchRequest.Size = perPage
+	searchRequest.From = front
+	searchResults, err := index.Search(searchRequest)
+	if err != nil {
+		fmt.Printf("Error: %#v", err)
+	}
+	for _, result := range searchResults.Hits {
+		fmt.Printf("Queuing ID: %s\n", result.ID)
+		raw, err := txn.First("items", "id", result.ID)
+		if err != nil {
+			panic(err)
+		}
+		if raw == nil {
+			fmt.Printf("Could not find ID!: %s\n", result.ID)
+		} else {
+			item := raw.(Item)
+			items = append(items, item)
+		}
+	}
+
+	fmt.Printf("SearchResults:\n%v\n", searchResults)
+
+	return ItemResult{Items: items, Total: int(searchResults.Total), Pages: int(math.Ceil(float64(searchResults.Total) / float64(perPage))), Page: pg}
 }
 
 func itemsFromVars(context map[string]interface{}) ItemResult {
@@ -280,6 +350,27 @@ func itemsFromVars(context map[string]interface{}) ItemResult {
 			item := obj.(Item)
 			items = append(items, item)
 		}
+		searchComplete = true
+	}
+	if b, ok := pathvars["b"]; ok {
+		fmt.Printf("Bleve search \"%s\"\n", b)
+		search := bleve.NewQueryStringQuery(b)
+		searchRequest := bleve.NewSearchRequest(search)
+		searchResults, err := index.Search(searchRequest)
+		if err != nil {
+			fmt.Printf("Error: %#v", err)
+		}
+		for _, result := range searchResults.Hits {
+			raw, err := txn.First("items", "id", result.ID)
+			if err != nil {
+				panic(err)
+			}
+			if raw != nil {
+				item := raw.(Item)
+				items = append(items, item)
+			}
+		}
+		fmt.Printf("Results:\n%v\n", searchResults)
 		searchComplete = true
 	}
 
@@ -411,14 +502,16 @@ func makeDB() {
 						Indexer: &memdb.StringFieldIndex{Field: "Repo"},
 					},
 					"categories": {
-						Name:    "categories",
-						Unique:  false,
-						Indexer: &memdb.StringSliceFieldIndex{Field: "Categories"},
+						Name:         "categories",
+						Unique:       false,
+						Indexer:      &memdb.StringSliceFieldIndex{Field: "Categories"},
+						AllowMissing: true,
 					},
 					"authors": {
-						Name:    "authors",
-						Unique:  false,
-						Indexer: &memdb.StringSliceFieldIndex{Field: "Authors"},
+						Name:         "authors",
+						Unique:       false,
+						Indexer:      &memdb.StringSliceFieldIndex{Field: "Authors"},
+						AllowMissing: true,
 					},
 					"date": {
 						Name:    "date",
@@ -457,6 +550,20 @@ func makeDB() {
 }
 
 func loadRepos() {
+	slugMapping := bleve.NewTextFieldMapping()
+	slugMapping.Analyzer = keyword.Name
+
+	itemMapping := bleve.NewDocumentMapping()
+	itemMapping.AddFieldMappingsAt("Slug", slugMapping)
+	itemMapping.AddFieldMappingsAt("Categories", slugMapping)
+
+	bmap := bleve.NewIndexMapping()
+	bmap.DefaultAnalyzer = "en"
+	bmap.AddDocumentMapping("item", itemMapping)
+	bmap.DefaultType = "item"
+
+	index, _ = bleve.NewMemOnly(bmap)
+
 	for repo, _ := range viper.GetStringMap("repos") {
 		loadRepo(repo)
 	}
@@ -526,14 +633,18 @@ func loadItem(repoName string, filename string) {
 		item.Html = string(blackfriday.Run([]byte(body), blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.HardLineBreak)))
 	}
 
-	arr := f["categories"].([]interface{})
-	categories := make([]string, len(arr))
-	for i, v := range arr {
-		categories[i] = fmt.Sprint(v)
-
-		category := new(Category)
-		category.Name = fmt.Sprint(v)
-		category.Count = 1
+	var categories []string
+	var authors []string
+	var arr []interface{}
+	if _, ok := f["categories"]; ok {
+		arr = f["categories"].([]interface{})
+		categories := make([]string, len(arr))
+		for i, v := range arr {
+			categories[i] = fmt.Sprint(v)
+			category := new(Category)
+			category.Name = fmt.Sprint(v)
+			category.Count = 1
+		}
 	}
 
 	if viper.IsSet("rake_minimum") {
@@ -555,19 +666,31 @@ func loadItem(repoName string, filename string) {
 	}
 
 	item.Categories = categories
-	arr = f["authors"].([]interface{})
-	authors := make([]string, len(arr))
-	for i, v := range arr {
-		authors[i] = fmt.Sprint(v)
+	if _, ok := f["authors"]; ok {
+		arr = f["authors"].([]interface{})
+		authors := make([]string, len(arr))
+		for i, v := range arr {
+			authors[i] = fmt.Sprint(v)
+		}
 	}
 	item.Authors = authors
 
-	item.RawDate = f["date"].(string)
+	if _, ok := f["date"]; ok {
+		item.RawDate = f["date"].(string)
+	} else {
+		filestat, _ := os.Stat(filename)
+		item.RawDate = filestat.ModTime().String()
+	}
 	item.Date, err = dateparse.ParseLocal(item.RawDate)
 
 	txn := db.Txn(true)
-	txn.Insert("items", item)
+	err = txn.Insert("items", item)
+	if err != nil {
+		fmt.Printf("Error inserting item "%s": %s\n", item.Slug, err)
+	}
 	txn.Commit()
+
+	index.Index(item.Slug, item)
 }
 
 func startWatching(path string, repoName string) {

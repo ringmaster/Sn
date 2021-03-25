@@ -686,7 +686,7 @@ func loadItem(repoName string, filename string) {
 	txn := db.Txn(true)
 	err = txn.Insert("items", item)
 	if err != nil {
-		fmt.Printf("Error inserting item "%s": %s\n", item.Slug, err)
+		fmt.Printf("Error inserting item \"%s\": %s\n", item.Slug, err)
 	}
 	txn.Commit()
 

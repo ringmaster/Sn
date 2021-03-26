@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/sha1"
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"math"
@@ -577,7 +579,7 @@ func loadRepo(repoName string) {
 	const bufferLen = 5000
 	itempaths := make(chan string, bufferLen)
 
-	const workers = 32
+	const workers = 1
 	for w := 0; w < workers; w++ {
 		go func(id int, itempaths <-chan string) {
 			for path := range itempaths {
@@ -770,13 +772,36 @@ func registerTemplateHelpers() {
 	})
 }
 
+type gzipResponseWriter struct {
+	io.Writer
+	http.ResponseWriter
+}
+
+func (w gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
+}
+
+func makeGzipHandler(fn http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			fn(w, r)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		gzr := gzipResponseWriter{Writer: gz, ResponseWriter: w}
+		fn(gzr, r)
+	}
+}
+
 func main() {
 	setupConfig()
 	makeDB()
 	loadRepos()
 	registerTemplateHelpers()
 
-	http.HandleFunc("/", handler)
+	http.HandleFunc("/", makeGzipHandler(handler))
 
 	if viper.IsSet("ssldomains") {
 		certManager := autocert.Manager{

@@ -99,9 +99,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Matched Route: %s\n", routeMatch)
 		switch viper.GetString(fmt.Sprintf("%s.handler", routeMatch)) {
 		case "posts":
-			output, _ := postHandler(routeMatch, context)
+			output, context := postHandler(routeMatch, context)
 			// May use context here to set additional headers, as defined by the handler
-			w.Header().Add("Content-Type", "text/html")
+			w.Header().Add("Content-Type", context["mime"].(string))
 			w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 			w.Header().Add("X-Frame-Options", "SAMEORIGIN")
 			w.Header().Add("X-Content-Type-Options", "nosniff")
@@ -236,6 +236,11 @@ func postHandler(routeMatch string, context map[string]interface{}) (string, map
 
 			context[name] = itemResult
 		}
+	}
+
+	context["mime"] = "text/html"
+	if viper.IsSet(fmt.Sprintf("%s.content-type", routeMatch)) {
+		context["mime"] = viper.GetString(fmt.Sprintf("%s.content-type", routeMatch))
 	}
 
 	rendered, err := renderTemplateFile(templatefilename, context)

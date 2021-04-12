@@ -77,7 +77,6 @@ var index bleve.Index
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	var context map[string]interface{}
-	var layoutfilename string
 	var pathVars map[string]string
 	var output string
 	var staticfile string
@@ -94,91 +93,117 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		fmt.Printf("Rendering 404\n")
-		// This should render a 404 if we know how
-	} else {
-		fmt.Printf("Matched Route: %s\n", routeMatch)
-		switch viper.GetString(fmt.Sprintf("%s.handler", routeMatch)) {
-		case "posts":
-			output, context := postHandler(routeMatch, context)
-			// May use context here to set additional headers, as defined by the handler
-			w.Header().Add("Content-Type", context["mime"].(string))
-			w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-			w.Header().Add("X-Frame-Options", "SAMEORIGIN")
-			w.Header().Add("X-Content-Type-Options", "nosniff")
-			w.Header().Add("Upgrade-Insecure-Requests", "1")
-			w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
-			w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
-			w.Write([]byte(output))
-			break
-		case "static":
-			staticfile = viper.GetString(fmt.Sprintf("%s.file", routeMatch))
-			if pathVars["file"] != "" {
-				staticfile = pathVars["file"]
-			}
-			staticfile = path.Join(viper.GetString("path"), viper.GetString("template_path"), viper.GetString(fmt.Sprintf("%s.path", routeMatch)), staticfile)
-			fmt.Printf("Rendering static file: %s\n", staticfile)
-			f, err := os.Open(staticfile)
-			if f == nil || err != nil {
-				fmt.Printf("Could not open static file!\n")
-			} else {
-				// Read file into memory
-				fileBytes, err := ioutil.ReadAll(f)
-				if err != nil {
-					log.Println(err)
-					_, _ = fmt.Fprintf(w, "Error file bytes")
-					return
-				}
+		routeMatch = "routes.error_404"
+	}
 
-				file, err := os.Stat(staticfile)
-
-				// Check mime
-				switch strings.ToLower(filepath.Ext(staticfile)) {
-				case ".css":
-					mime = "text/css"
-					break
-				default:
-					mime = http.DetectContentType(fileBytes)
-				}
-
-				h := sha1.New()
-				h.Write(fileBytes)
-				bs := h.Sum(nil)
-
-				// Custom headers
-				w.Header().Add("Content-Type", mime)
-
-				w.Header().Add("Cache-Control", "public, min-fresh=86400, max-age=31536000")
-				w.Header().Add("Content-Description", "File Transfer")
-				w.Header().Add("Pragma", "public")
-				w.Header().Add("Last-Modified", file.ModTime().String())
-				w.Header().Add("ETag", fmt.Sprintf("%x\n", bs))
-				w.Header().Add("Expires", "Fri, 1 Jan 3030 00:00:00 GMT")
-				w.Header().Add("Content-Length", strconv.Itoa(len(fileBytes)))
-				w.Header().Add("Access-Control-Allow-Origin", r.Host)
-				w.Write(fileBytes)
-				//fmt.Fprint(w, fileBytes)
-			}
-			//http.ServeFile(w, r, staticfile)
-			break
-		case "git":
-			output, _ := gitHandler(routeMatch, context)
-			fmt.Fprint(w, output)
-			break
-		default:
-			fmt.Printf("Rendering default handler\n")
-			layoutfilename = path.Join(viper.GetString("path"), viper.GetString("template_path"), "layout.html.hb")
-			fmt.Printf("Rendering layout: %s\n", layoutfilename)
-			output, _ = renderTemplateFile(layoutfilename, context)
-
-			w.Header().Add("Content-Type", "text/html")
-			w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-			w.Header().Add("X-Frame-Options", "SAMEORIGIN")
-			w.Header().Add("X-Content-Type-Options", "nosniff")
-			w.Header().Add("Upgrade-Insecure-Requests", "1")
-			w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
-			w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
-			w.Write([]byte(output))
+	fmt.Printf("Matched Route: %s\n", routeMatch)
+	switch viper.GetString(fmt.Sprintf("%s.handler", routeMatch)) {
+	case "posts":
+		output, context := postHandler(routeMatch, context)
+		// May use context here to set additional headers, as defined by the handler
+		w.Header().Add("Content-Type", context["mime"].(string))
+		w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		w.Header().Add("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Add("X-Content-Type-Options", "nosniff")
+		w.Header().Add("Upgrade-Insecure-Requests", "1")
+		w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
+		w.Write([]byte(output))
+		break
+	case "static":
+		staticfile = viper.GetString(fmt.Sprintf("%s.file", routeMatch))
+		if pathVars["file"] != "" {
+			staticfile = pathVars["file"]
 		}
+		staticfile = path.Join(viper.GetString("path"), viper.GetString("template_path"), viper.GetString(fmt.Sprintf("%s.path", routeMatch)), staticfile)
+		fmt.Printf("Rendering static file: %s\n", staticfile)
+		f, err := os.Open(staticfile)
+		if f == nil || err != nil {
+			fmt.Printf("Could not open static file!\n")
+		} else {
+			// Read file into memory
+			fileBytes, err := ioutil.ReadAll(f)
+			if err != nil {
+				log.Println(err)
+				_, _ = fmt.Fprintf(w, "Error file bytes")
+				return
+			}
+
+			file, err := os.Stat(staticfile)
+
+			// Check mime
+			switch strings.ToLower(filepath.Ext(staticfile)) {
+			case ".css":
+				mime = "text/css"
+				break
+			default:
+				mime = http.DetectContentType(fileBytes)
+			}
+
+			h := sha1.New()
+			h.Write(fileBytes)
+			bs := h.Sum(nil)
+
+			// Custom headers
+			w.Header().Add("Content-Type", mime)
+
+			w.Header().Add("Cache-Control", "public, min-fresh=86400, max-age=31536000")
+			w.Header().Add("Content-Description", "File Transfer")
+			w.Header().Add("Pragma", "public")
+			w.Header().Add("Last-Modified", file.ModTime().String())
+			w.Header().Add("ETag", fmt.Sprintf("%x\n", bs))
+			w.Header().Add("Expires", "Fri, 1 Jan 3030 00:00:00 GMT")
+			w.Header().Add("Content-Length", strconv.Itoa(len(fileBytes)))
+			w.Header().Add("Access-Control-Allow-Origin", r.Host)
+			w.Write(fileBytes)
+			//fmt.Fprint(w, fileBytes)
+		}
+		//http.ServeFile(w, r, staticfile)
+		break
+	case "git":
+		output, _ := gitHandler(routeMatch, context)
+		fmt.Fprint(w, output)
+		break
+	case "redirect":
+		redirectConfig := viper.GetString(fmt.Sprintf("%s.redirect", routeMatch))
+		tooTemplate := template.Must(template.New("").Parse(redirectConfig))
+		buf := bytes.Buffer{}
+		pathvars := context["pathvars"].(map[string]string)
+		tooTemplate.Execute(&buf, pathvars)
+		var redirectUrl string = buf.String()
+		fmt.Printf("Redirecting to: %s\n", redirectUrl)
+		http.Redirect(w, r, redirectUrl, 301)
+		break
+	default:
+		fmt.Printf("Rendering default handler\n")
+		layoutfilename := getTemplateFileFromConfig(fmt.Sprintf("%s.layout", routeMatch), "layout.html.hb")
+		templatefilename := getTemplateFileFromConfig(fmt.Sprintf("%s.template", routeMatch), "template.html.hb")
+
+		fmt.Printf("Rendering template: %s\n", templatefilename)
+		content, _ := renderTemplateFile(templatefilename, context)
+		context["content"] = content
+
+		fmt.Printf("Rendering layout: %s\n", layoutfilename)
+		output, _ = renderTemplateFile(layoutfilename, context)
+
+		if viper.IsSet(fmt.Sprintf("%s.status", routeMatch)) {
+			fmt.Printf("Setting custom status: %d\n", viper.GetInt(fmt.Sprintf("%s.status", routeMatch)))
+			w.WriteHeader(viper.GetInt(fmt.Sprintf("%s.status", routeMatch)))
+		}
+
+		if viper.IsSet(fmt.Sprintf("%s.content-type", routeMatch)) {
+			fmt.Printf("Setting custom content-type: %s\n", viper.GetString(fmt.Sprintf("%s.content-type", routeMatch)))
+			w.Header().Add("Content-Type", viper.GetString(fmt.Sprintf("%s.content-type", routeMatch)))
+		} else {
+			w.Header().Add("Content-Type", "text/html")
+		}
+		w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		w.Header().Add("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Add("X-Content-Type-Options", "nosniff")
+		w.Header().Add("Upgrade-Insecure-Requests", "1")
+		w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
+		w.Write([]byte(output))
 	}
 }
 
@@ -570,7 +595,11 @@ func loadRepos() {
 	bmap.DefaultType = "item"
 
 	if viper.IsSet("filedb") {
-		index, _ = bleve.New(viper.GetString("filedb"), bmap)
+		if _, err := os.Stat(viper.GetString("filedb")); os.IsNotExist(err) {
+			index, _ = bleve.New(viper.GetString("filedb"), bmap)
+		} else {
+			index, _ = bleve.Open(viper.GetString("filedb"))
+		}
 	} else {
 		index, _ = bleve.NewMemOnly(bmap)
 	}

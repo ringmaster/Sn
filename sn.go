@@ -689,7 +689,7 @@ func loadItem(repoName string, filename string) {
 	var arr []interface{}
 	if _, ok := f["categories"]; ok {
 		arr = f["categories"].([]interface{})
-		categories := make([]string, len(arr))
+		categories = make([]string, len(arr))
 		for i, v := range arr {
 			categories[i] = fmt.Sprint(v)
 			category := new(Category)

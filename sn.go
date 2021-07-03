@@ -222,15 +222,15 @@ func gitHandler(routeMatch string, context map[string]interface{}) (string, map[
 
 	r, err := git.PlainOpen(path)
 	if err != nil {
-		fmt.Printf("%v#\n", err)
+		fmt.Printf("Git PlainOpen: %v#\n", err)
 	}
 	w, err := r.Worktree()
 	if err != nil {
-		fmt.Printf("%v#\n", err)
+		fmt.Printf("Git Worktree: %v#\n", err)
 	}
 	err = w.Pull(&git.PullOptions{RemoteName: remote})
 	if err != nil {
-		fmt.Printf("%v#\n", err)
+		fmt.Printf("Git PullOptions: %v#\n", err)
 	}
 
 	ref, _ := r.Head()

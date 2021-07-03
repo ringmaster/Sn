@@ -32,9 +32,11 @@ import (
 	"github.com/blevesearch/bleve/v2/mapping"
 	"github.com/gernest/front"
 	"github.com/go-git/go-git/v5"
+	"github.com/gomarkdown/markdown"
+	"github.com/gomarkdown/markdown/html"
+	"github.com/gomarkdown/markdown/parser"
 	"github.com/hashicorp/go-memdb"
 	"github.com/radovskyb/watcher"
-	"github.com/russross/blackfriday/v2"
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/acme/autocert"
 )
@@ -670,7 +672,16 @@ func loadItem(repoName string, filename string) {
 	if ok && ishtml.(bool) {
 		item.Html = body
 	} else {
-		item.Html = string(blackfriday.Run([]byte(body), blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.HardLineBreak)))
+		extensions := parser.CommonExtensions | parser.AutoHeadingIDs | parser.Mmark | parser.Footnotes | parser.AutoHeadingIDs | parser.Attributes | parser.DefinitionLists
+		parser := parser.NewWithExtensions(extensions)
+
+		md := []byte(body)
+
+		htmlFlags := html.CommonFlags | html.HrefTargetBlank | html.FootnoteReturnLinks
+		opts := html.RendererOptions{Flags: htmlFlags}
+		renderer := html.NewRenderer(opts)
+		item.Html = string(markdown.ToHTML(md, parser, renderer))
+		//item.Html = string(blackfriday.Run([]byte(body), blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.HardLineBreak)))
 	}
 
 	var categories []string

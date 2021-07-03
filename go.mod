@@ -10,9 +10,10 @@ require (
 	github.com/blevesearch/bleve/v2 v2.0.2
 	github.com/gernest/front v0.0.0-20181129160812-ed80ca338b88
 	github.com/go-git/go-git/v5 v5.2.0
+	github.com/gomarkdown/markdown v0.0.0-20210514010506-3b9f47219fe7
 	github.com/hashicorp/go-memdb v1.3.0
 	github.com/radovskyb/watcher v1.0.7
-	github.com/russross/blackfriday/v2 v2.0.1
+	github.com/russross/blackfriday/v2 v2.0.1 // indirect
 	github.com/shurcooL/sanitized_anchor_name v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/spf13/viper v1.7.1

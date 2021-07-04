@@ -2,12 +2,8 @@ package main
 
 import (
 	"bytes"
-	"compress/gzip"
-	"crypto/sha1"
 	"crypto/tls"
-	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"math"
@@ -31,9 +27,12 @@ import (
 	"github.com/blevesearch/bleve/v2/analysis/analyzer/keyword"
 	"github.com/gernest/front"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-http-utils/etag"
 	"github.com/gomarkdown/markdown"
 	"github.com/gomarkdown/markdown/html"
 	"github.com/gomarkdown/markdown/parser"
+	"github.com/gorilla/handlers"
+	"github.com/gorilla/mux"
 	"github.com/hashicorp/go-memdb"
 	"github.com/radovskyb/watcher"
 	"github.com/spf13/viper"
@@ -75,178 +74,67 @@ var db *memdb.MemDB
 
 var index bleve.Index
 
-func handler(w http.ResponseWriter, r *http.Request) {
-	var context map[string]interface{}
-	var pathVars map[string]string
-	var output string
-	var staticfile string
-	var mime string
-
-	context = make(map[string]interface{})
-	context["config"] = viper.AllSettings()
-
-	fmt.Printf("Path requested: %s\n", r.URL.Path)
-
-	routeMatch, pathVars, err := getMatchingRoute(r.URL.Path)
-	context["pathvars"] = pathVars
-	context["params"] = r.URL.Query()
-
-	if err != nil {
-		fmt.Printf("Rendering 404\n")
-		routeMatch = "routes.error_404"
-	}
-
-	fmt.Printf("Matched Route: %s\n", routeMatch)
-	switch viper.GetString(fmt.Sprintf("%s.handler", routeMatch)) {
-	case "posts":
-		output, context := postHandler(routeMatch, context)
-		// May use context here to set additional headers, as defined by the handler
-		w.Header().Add("Content-Type", context["mime"].(string))
-		w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-		w.Header().Add("X-Frame-Options", "SAMEORIGIN")
-		w.Header().Add("X-Content-Type-Options", "nosniff")
-		w.Header().Add("Upgrade-Insecure-Requests", "1")
-		w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
-		w.Write([]byte(output))
-	case "static":
-		staticfile = viper.GetString(fmt.Sprintf("%s.file", routeMatch))
-		if pathVars["file"] != "" {
-			staticfile = pathVars["file"]
-		}
-		staticfile = path.Join(viper.GetString("path"), viper.GetString("template_path"), viper.GetString(fmt.Sprintf("%s.path", routeMatch)), staticfile)
-		fmt.Printf("Rendering static file: %s\n", staticfile)
-		f, err := os.Open(staticfile)
-		if f == nil || err != nil {
-			fmt.Printf("Could not open static file!\n")
-		} else {
-			// Read file into memory
-			fileBytes, err := ioutil.ReadAll(f)
-			if err != nil {
-				log.Println(err)
-				_, _ = fmt.Fprintf(w, "Error file bytes")
-				return
-			}
-
-			file, _ := os.Stat(staticfile)
-
-			// Check mime
-			switch strings.ToLower(filepath.Ext(staticfile)) {
-			case ".css":
-				mime = "text/css"
-			default:
-				mime = http.DetectContentType(fileBytes)
-			}
-
-			h := sha1.New()
-			h.Write(fileBytes)
-			bs := h.Sum(nil)
-
-			// Custom headers
-			w.Header().Add("Content-Type", mime)
-
-			w.Header().Add("Cache-Control", "public, min-fresh=86400, max-age=31536000")
-			w.Header().Add("Content-Description", "File Transfer")
-			w.Header().Add("Pragma", "public")
-			w.Header().Add("Last-Modified", file.ModTime().String())
-			w.Header().Add("ETag", fmt.Sprintf("%x\n", bs))
-			w.Header().Add("Expires", "Fri, 1 Jan 3030 00:00:00 GMT")
-			w.Header().Add("Content-Length", strconv.Itoa(len(fileBytes)))
-			w.Header().Add("Access-Control-Allow-Origin", r.Host)
-			w.Write(fileBytes)
-			//fmt.Fprint(w, fileBytes)
-		}
-		//http.ServeFile(w, r, staticfile)
-	case "git":
-		output, _ := gitHandler(routeMatch, context)
-		fmt.Fprint(w, output)
-	case "redirect":
-		redirectConfig := viper.GetString(fmt.Sprintf("%s.redirect", routeMatch))
-		tooTemplate := template.Must(template.New("").Parse(redirectConfig))
-		buf := bytes.Buffer{}
-		pathvars := context["pathvars"].(map[string]string)
-		tooTemplate.Execute(&buf, pathvars)
-		var redirectUrl string = buf.String()
-		fmt.Printf("Redirecting to: %s\n", redirectUrl)
-		http.Redirect(w, r, redirectUrl, http.StatusMovedPermanently)
-	default:
-		fmt.Printf("Rendering default handler\n")
-		layoutfilename := getTemplateFileFromConfig(fmt.Sprintf("%s.layout", routeMatch), "layout.html.hb")
-		templatefilename := getTemplateFileFromConfig(fmt.Sprintf("%s.template", routeMatch), "template.html.hb")
-
-		fmt.Printf("Rendering template: %s\n", templatefilename)
-		content, _ := renderTemplateFile(templatefilename, context)
-		context["content"] = content
-
-		fmt.Printf("Rendering layout: %s\n", layoutfilename)
-		output, _ = renderTemplateFile(layoutfilename, context)
-
-		if viper.IsSet(fmt.Sprintf("%s.status", routeMatch)) {
-			fmt.Printf("Setting custom status: %d\n", viper.GetInt(fmt.Sprintf("%s.status", routeMatch)))
-			w.WriteHeader(viper.GetInt(fmt.Sprintf("%s.status", routeMatch)))
-		}
-
-		if viper.IsSet(fmt.Sprintf("%s.content-type", routeMatch)) {
-			fmt.Printf("Setting custom content-type: %s\n", viper.GetString(fmt.Sprintf("%s.content-type", routeMatch)))
-			w.Header().Add("Content-Type", viper.GetString(fmt.Sprintf("%s.content-type", routeMatch)))
-		} else {
-			w.Header().Add("Content-Type", "text/html")
-		}
-		w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-		w.Header().Add("X-Frame-Options", "SAMEORIGIN")
-		w.Header().Add("X-Content-Type-Options", "nosniff")
-		w.Header().Add("Upgrade-Insecure-Requests", "1")
-		w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
-		w.Write([]byte(output))
-	}
-}
-
-func gitHandler(routeMatch string, context map[string]interface{}) (string, map[string]interface{}) {
-	var remote string
+func gitHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("Rendering git handler\n")
 
-	path := viper.GetString(fmt.Sprintf("%s.path", routeMatch))
-	if viper.IsSet(fmt.Sprintf("%s.remote", routeMatch)) {
-		remote = viper.GetString(fmt.Sprintf("%s.remote", routeMatch))
+	routeName := mux.CurrentRoute(r).GetName()
+	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
+	var remote string
+
+	path := configPath(viper.GetString(fmt.Sprintf("%s.dir", routeConfigLocation)))
+	if viper.IsSet(fmt.Sprintf("%s.remote", routeConfigLocation)) {
+		remote = viper.GetString(fmt.Sprintf("%s.remote", routeConfigLocation))
 	} else {
 		remote = "origin"
 	}
 
-	r, err := git.PlainOpen(path)
+	repo, err := git.PlainOpen(path)
 	if err != nil {
-		fmt.Printf("Git PlainOpen: %v#\n", err)
+		fmt.Printf("Git PlainOpen (%s): %#v\n", path, err)
 	}
-	w, err := r.Worktree()
+	worktree, err := repo.Worktree()
 	if err != nil {
-		fmt.Printf("Git Worktree: %v#\n", err)
+		fmt.Printf("Git Worktree: %#v\n", err)
 	}
-	err = w.Pull(&git.PullOptions{RemoteName: remote})
+	err = worktree.Pull(&git.PullOptions{RemoteName: remote})
 	if err != nil {
-		fmt.Printf("Git PullOptions: %v#\n", err)
+		fmt.Printf("Git PullOptions: %#v\n", err)
 	}
 
-	ref, _ := r.Head()
-	commit, _ := r.CommitObject(ref.Hash())
+	ref, _ := repo.Head()
+	commit, _ := repo.CommitObject(ref.Hash())
 	fmt.Printf("Current commit hash on %s: %s\n%s\n", path, ref.Hash(), commit)
 
-	return commit.Hash.String() + ": " + commit.Message, context
+	w.Header().Add("Content-Type", "text/plain")
+	w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	w.Header().Add("X-Frame-Options", "SAMEORIGIN")
+	w.Header().Add("X-Content-Type-Options", "nosniff")
+	w.Header().Add("Upgrade-Insecure-Requests", "1")
+	w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
+	w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
+
+	w.Write([]byte(commit.Hash.String() + ": " + commit.Message))
 }
 
-func postHandler(routeMatch string, context map[string]interface{}) (string, map[string]interface{}) {
+func postHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("Rendering posts handler\n")
-	layoutfilename := getTemplateFileFromConfig(fmt.Sprintf("%s.layout", routeMatch), "layout.html.hb")
-	templatefilename := getTemplateFileFromConfig(fmt.Sprintf("%s.template", routeMatch), "template.html.hb")
+	routeName := mux.CurrentRoute(r).GetName()
+	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
+	layoutfilename := getTemplateFileFromConfig(fmt.Sprintf("%s.layout", routeConfigLocation), "layout.html.hb")
+	templatefilename := getTemplateFileFromConfig(fmt.Sprintf("%s.template", routeConfigLocation), "template.html.hb")
 	fmt.Printf("Rendering template: %s\n", templatefilename)
+	context := viper.GetStringMap(routeConfigLocation)
+	context["pathvars"] = mux.Vars(r)
+	context["params"] = r.URL.Query()
 	context["post"] = nil
 
-	pathvars := context["pathvars"].(map[string]string)
+	pathvars := context["pathvars"]
 	fmt.Printf("Pathvars: %+v\n", pathvars)
 
 	// Find the itemquery instances, loop over, assign results to context
-	for name, value := range viper.GetStringMap(routeMatch) {
+	for outVarName, value := range viper.GetStringMap(routeConfigLocation) {
 		if _, is_map := value.(map[string]interface{}); is_map {
-			query := viper.GetString(fmt.Sprintf("%s.%s.query", routeMatch, name))
+			query := viper.GetString(fmt.Sprintf("%s.%s.query", routeConfigLocation, outVarName))
 			queryTemplate := template.Must(template.New("").Parse(query))
 			buf := bytes.Buffer{}
 			queryTemplate.Execute(&buf, pathvars)
@@ -254,13 +142,13 @@ func postHandler(routeMatch string, context map[string]interface{}) (string, map
 			fmt.Printf("Rendered Query: %#v\n", renderedQuery)
 			itemResult := itemsFromQuery(renderedQuery, context)
 
-			context[name] = itemResult
+			context[outVarName] = itemResult
 		}
 	}
 
 	context["mime"] = "text/html"
-	if viper.IsSet(fmt.Sprintf("%s.content-type", routeMatch)) {
-		context["mime"] = viper.GetString(fmt.Sprintf("%s.content-type", routeMatch))
+	if viper.IsSet(fmt.Sprintf("%s.content-type", routeConfigLocation)) {
+		context["mime"] = viper.GetString(fmt.Sprintf("%s.content-type", routeConfigLocation))
 	}
 
 	rendered, err := renderTemplateFile(templatefilename, context)
@@ -278,8 +166,16 @@ func postHandler(routeMatch string, context map[string]interface{}) (string, map
 		context["content"] = fmt.Sprintf("<div class=\"notification is-danger\">Error rendering layout: %s</div>\n", err)
 		layoutRendered = "<html>" + context["content"].(string) + "</html>"
 	}
+	// May use context here to set additional headers, as defined by the handler
+	w.Header().Add("Content-Type", context["mime"].(string))
+	w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	w.Header().Add("X-Frame-Options", "SAMEORIGIN")
+	w.Header().Add("X-Content-Type-Options", "nosniff")
+	w.Header().Add("Upgrade-Insecure-Requests", "1")
+	w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
+	w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
 
-	return layoutRendered, context
+	w.Write([]byte(layoutRendered))
 }
 
 func MinOf(vars ...int) int {
@@ -294,6 +190,7 @@ func MinOf(vars ...int) int {
 	return min
 }
 
+// @todo refactor this to use specific tuple values instead of the full context?
 func itemsFromQuery(query string, context map[string]interface{}) ItemResult {
 	var items []Item
 	var pg int
@@ -360,47 +257,6 @@ func renderTemplateFile(filename string, context map[string]interface{}) (string
 	return raymond.Render(string(file), context)
 }
 
-func getMatchingRoute(url string) (string, map[string]string, error) {
-	f := func(c rune) bool {
-		return c == '/'
-	}
-
-	p := strings.FieldsFunc(url, f)
-
-	var pathComponents map[string]string = make(map[string]string)
-
-	routelist := make([]string, 0, len(viper.GetStringMap("routes")))
-	for key := range viper.GetStringMap("routes") {
-		routelist = append(routelist, key)
-	}
-	sort.Strings(routelist)
-
-ROUTES:
-	for _, route := range routelist {
-		fullRoute := fmt.Sprintf("routes.%s", route)
-		routeRoute := fmt.Sprintf("%s.route", fullRoute)
-		rp := strings.FieldsFunc(viper.GetString(routeRoute), f)
-		if len(rp) != len(p) {
-			continue ROUTES
-		}
-		//fmt.Printf("------------\nRoute: %s   URL: %s\n", strings.Join(rp, "/"), strings.Join(p, "/"))
-		for z := 0; z < len(p); z++ {
-			//fmt.Printf("Route: %s   URL: %s\n", rp[z], p[z])
-			if (rp[z] == "" && p[z] != "") || (rp[z][0] != ':' && rp[z] != p[z]) {
-				continue ROUTES
-			}
-		}
-		for z := 0; z < len(p); z++ {
-			if rp[0] != "" && rp[z][0] == ':' {
-				fmt.Printf("Setting pathvar \"%s\" to: %s\n", rp[z][1:], p[z])
-				pathComponents[rp[z][1:]] = p[z]
-			}
-		}
-		return fullRoute, pathComponents, nil
-	}
-	return "", pathComponents, errors.New("no routes are configured")
-}
-
 func setupConfig() {
 	viper.SetConfigName("sn")
 	viper.SetConfigType("toml")
@@ -429,6 +285,10 @@ func dirExists(dir string) bool {
 }
 
 func configPath(shortpath string) string {
+	if shortpath[0] == '/' && dirExists(shortpath) {
+		return shortpath
+	}
+
 	base, err := filepath.Abs(viper.GetString("path"))
 	if err != nil {
 		panic(fmt.Sprintf("Configpath for %s does not have absolute path at %s", shortpath, viper.GetString("path")))
@@ -747,26 +607,65 @@ func registerTemplateHelpers() {
 	})
 }
 
-type gzipResponseWriter struct {
-	io.Writer
-	http.ResponseWriter
+func catchallHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("Rendering default handler\n")
+	routeName := mux.CurrentRoute(r).GetName()
+	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
+	layoutfilename := getTemplateFileFromConfig(fmt.Sprintf("%s.layout", routeConfigLocation), "layout.html.hb")
+	templatefilename := getTemplateFileFromConfig(fmt.Sprintf("%s.template", routeConfigLocation), "template.html.hb")
+
+	fmt.Printf("Rendering template: %s\n", templatefilename)
+	context := viper.GetStringMap(routeConfigLocation)
+	context["pathvars"] = mux.Vars(r)
+	context["params"] = r.URL.Query()
+	context["post"] = nil
+	content, _ := renderTemplateFile(templatefilename, context)
+	context["content"] = content
+
+	fmt.Printf("Rendering layout: %s\n", layoutfilename)
+	output, _ := renderTemplateFile(layoutfilename, context)
+
+	if viper.IsSet(fmt.Sprintf("%s.status", routeConfigLocation)) {
+		fmt.Printf("Setting custom status: %d\n", viper.GetInt(fmt.Sprintf("%s.status", routeConfigLocation)))
+		w.WriteHeader(viper.GetInt(fmt.Sprintf("%s.status", routeConfigLocation)))
+	}
+
+	if viper.IsSet(fmt.Sprintf("%s.content-type", routeConfigLocation)) {
+		fmt.Printf("Setting custom content-type: %s\n", viper.GetString(fmt.Sprintf("%s.content-type", routeConfigLocation)))
+		w.Header().Add("Content-Type", viper.GetString(fmt.Sprintf("%s.content-type", routeConfigLocation)))
+	} else {
+		w.Header().Add("Content-Type", "text/html")
+	}
+	w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	w.Header().Add("X-Frame-Options", "SAMEORIGIN")
+	w.Header().Add("X-Content-Type-Options", "nosniff")
+	w.Header().Add("Upgrade-Insecure-Requests", "1")
+	w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
+	w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
+	w.Write([]byte(output))
 }
 
-func (w gzipResponseWriter) Write(b []byte) (int, error) {
-	return w.Writer.Write(b)
-}
-
-func makeGzipHandler(fn http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			fn(w, r)
-			return
+func setupRoutes(router *mux.Router) {
+	routelist := make([]string, 0, len(viper.GetStringMap("routes")))
+	for key := range viper.GetStringMap("routes") {
+		routelist = append(routelist, key)
+	}
+	sort.Strings(routelist)
+	for _, routeName := range routelist {
+		routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
+		routePath := viper.GetString(fmt.Sprintf("%s.path", routeConfigLocation))
+		switch viper.GetString(fmt.Sprintf("%s.handler", routeConfigLocation)) {
+		case "posts":
+			router.HandleFunc(routePath, postHandler).Name(routeName)
+		case "static":
+			dir := configPath(viper.GetString(fmt.Sprintf("%s.dir", routeConfigLocation)))
+			router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, http.FileServer(http.Dir(dir))))
+		case "git":
+			router.HandleFunc(routePath, gitHandler).Name(routeName)
+		case "redirect":
+		default:
+			router.PathPrefix("/").HandlerFunc(catchallHandler)
 		}
-		w.Header().Set("Content-Encoding", "gzip")
-		gz := gzip.NewWriter(w)
-		defer gz.Close()
-		gzr := gzipResponseWriter{Writer: gz, ResponseWriter: w}
-		fn(gzr, r)
 	}
 }
 
@@ -775,8 +674,10 @@ func main() {
 	makeDB()
 	loadRepos()
 	registerTemplateHelpers()
+	router := mux.NewRouter()
+	setupRoutes(router)
 
-	http.HandleFunc("/", makeGzipHandler(handler))
+	http.Handle("/", etag.Handler(handlers.CompressHandler(router), false))
 
 	if viper.IsSet("ssldomains") {
 		certManager := autocert.Manager{

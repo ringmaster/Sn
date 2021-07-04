@@ -10,7 +10,12 @@ require (
 	github.com/blevesearch/bleve/v2 v2.0.2
 	github.com/gernest/front v0.0.0-20181129160812-ed80ca338b88
 	github.com/go-git/go-git/v5 v5.2.0
+	github.com/go-http-utils/etag v0.0.0-20161124023236-513ea8f21eb1
+	github.com/go-http-utils/fresh v0.0.0-20161124030543-7231e26a4b27 // indirect
+	github.com/go-http-utils/headers v0.0.0-20181008091004-fed159eddc2a // indirect
 	github.com/gomarkdown/markdown v0.0.0-20210514010506-3b9f47219fe7
+	github.com/gorilla/handlers v1.5.1
+	github.com/gorilla/mux v1.8.0
 	github.com/hashicorp/go-memdb v1.3.0
 	github.com/radovskyb/watcher v1.0.7
 	github.com/russross/blackfriday/v2 v2.0.1 // indirect

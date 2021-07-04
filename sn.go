@@ -29,7 +29,6 @@ import (
 	"github.com/aymerick/raymond"
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/analysis/analyzer/keyword"
-	"github.com/blevesearch/bleve/v2/mapping"
 	"github.com/gernest/front"
 	"github.com/go-git/go-git/v5"
 	"github.com/gomarkdown/markdown"
@@ -74,7 +73,6 @@ type Author struct {
 
 var db *memdb.MemDB
 
-var bmap mapping.IndexMappingImpl
 var index bleve.Index
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +82,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	var staticfile string
 	var mime string
 
-	context = make(map[string]interface{}, 0)
+	context = make(map[string]interface{})
 	context["config"] = viper.AllSettings()
 
 	fmt.Printf("Path requested: %s\n", r.URL.Path)
@@ -111,7 +109,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
 		w.Write([]byte(output))
-		break
 	case "static":
 		staticfile = viper.GetString(fmt.Sprintf("%s.file", routeMatch))
 		if pathVars["file"] != "" {
@@ -131,13 +128,12 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			file, err := os.Stat(staticfile)
+			file, _ := os.Stat(staticfile)
 
 			// Check mime
 			switch strings.ToLower(filepath.Ext(staticfile)) {
 			case ".css":
 				mime = "text/css"
-				break
 			default:
 				mime = http.DetectContentType(fileBytes)
 			}
@@ -161,11 +157,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			//fmt.Fprint(w, fileBytes)
 		}
 		//http.ServeFile(w, r, staticfile)
-		break
 	case "git":
 		output, _ := gitHandler(routeMatch, context)
 		fmt.Fprint(w, output)
-		break
 	case "redirect":
 		redirectConfig := viper.GetString(fmt.Sprintf("%s.redirect", routeMatch))
 		tooTemplate := template.Must(template.New("").Parse(redirectConfig))
@@ -174,8 +168,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		tooTemplate.Execute(&buf, pathvars)
 		var redirectUrl string = buf.String()
 		fmt.Printf("Redirecting to: %s\n", redirectUrl)
-		http.Redirect(w, r, redirectUrl, 301)
-		break
+		http.Redirect(w, r, redirectUrl, http.StatusMovedPermanently)
 	default:
 		fmt.Printf("Rendering default handler\n")
 		layoutfilename := getTemplateFileFromConfig(fmt.Sprintf("%s.layout", routeMatch), "layout.html.hb")
@@ -251,7 +244,7 @@ func postHandler(routeMatch string, context map[string]interface{}) (string, map
 	fmt.Printf("Pathvars: %+v\n", pathvars)
 
 	// Find the itemquery instances, loop over, assign results to context
-	for name, value := range viper.GetStringMap(fmt.Sprintf("%s", routeMatch)) {
+	for name, value := range viper.GetStringMap(routeMatch) {
 		if _, is_map := value.(map[string]interface{}); is_map {
 			query := viper.GetString(fmt.Sprintf("%s.%s.query", routeMatch, name))
 			queryTemplate := template.Must(template.New("").Parse(query))
@@ -350,94 +343,6 @@ func itemsFromQuery(query string, context map[string]interface{}) ItemResult {
 	return ItemResult{Items: items, Total: int(searchResults.Total), Pages: int(math.Ceil(float64(searchResults.Total) / float64(perPage))), Page: pg}
 }
 
-func itemsFromVars(context map[string]interface{}) ItemResult {
-	var items []Item
-	var pg int
-
-	searchComplete := false
-
-	items = make([]Item, 0)
-	pathvars := context["pathvars"].(map[string]string)
-	fmt.Printf("Pathvars: %+v\n", pathvars)
-
-	txn := db.Txn(false)
-	defer txn.Abort()
-	if slug, ok := pathvars["slug"]; ok {
-		fmt.Printf("Searching for slug \"%s\"\n", slug)
-		raw, err := txn.First("items", "id", slug)
-		if err != nil {
-			panic(err)
-		}
-		if raw != nil {
-			item := raw.(Item)
-			items = append(items, item)
-		}
-		searchComplete = true
-	}
-	if category, ok := pathvars["category"]; ok {
-		fmt.Printf("Searching for tag \"%s\"\n", category)
-		raw, err := txn.Get("items", "categories", category)
-		if err != nil {
-			panic(err)
-		}
-		for obj := raw.Next(); obj != nil; obj = raw.Next() {
-			item := obj.(Item)
-			items = append(items, item)
-		}
-		searchComplete = true
-	}
-	if b, ok := pathvars["b"]; ok {
-		fmt.Printf("Bleve search \"%s\"\n", b)
-		search := bleve.NewQueryStringQuery(b)
-		searchRequest := bleve.NewSearchRequest(search)
-		searchResults, err := index.Search(searchRequest)
-		if err != nil {
-			fmt.Printf("Error: %#v", err)
-		}
-		for _, result := range searchResults.Hits {
-			raw, err := txn.First("items", "id", result.ID)
-			if err != nil {
-				panic(err)
-			}
-			if raw != nil {
-				item := raw.(Item)
-				items = append(items, item)
-			}
-		}
-		fmt.Printf("Results:\n%v\n", searchResults)
-		searchComplete = true
-	}
-
-	if !searchComplete {
-		fmt.Printf("Returning all items\n")
-		raw, err := txn.Get("items", "id")
-		if err != nil {
-			panic(err)
-		}
-		for obj := raw.Next(); obj != nil; obj = raw.Next() {
-			item := obj.(Item)
-			items = append(items, item)
-		}
-		searchComplete = true
-	}
-
-	sort.SliceStable(items, func(i, j int) bool { return items[i].Date.After(items[j].Date) })
-
-	perPage := 5
-	pg = 1
-	if page, ok := context["params"].(url.Values)["page"]; ok {
-		pg, _ = strconv.Atoi(page[0])
-	}
-	if page, ok := pathvars["page"]; ok {
-		pg, _ = strconv.Atoi(page)
-	}
-	front := (pg - 1) * perPage
-	back := front + perPage
-	back = MinOf(len(items), back)
-
-	return ItemResult{Items: items[front:back], Total: len(items), Pages: int(math.Ceil(float64(len(items)) / float64(perPage))), Page: pg}
-}
-
 func getTemplateFileFromConfig(configPath string, alternative string) string {
 	var template string
 	if template = viper.GetString(configPath); template == "" {
@@ -462,8 +367,7 @@ func getMatchingRoute(url string) (string, map[string]string, error) {
 
 	p := strings.FieldsFunc(url, f)
 
-	var pathComponents map[string]string
-	pathComponents = make(map[string]string, 0)
+	var pathComponents map[string]string = make(map[string]string)
 
 	routelist := make([]string, 0, len(viper.GetStringMap("routes")))
 	for key := range viper.GetStringMap("routes") {
@@ -494,7 +398,7 @@ ROUTES:
 		}
 		return fullRoute, pathComponents, nil
 	}
-	return "", pathComponents, errors.New("No Routes :(")
+	return "", pathComponents, errors.New("no routes are configured")
 }
 
 func setupConfig() {
@@ -627,7 +531,7 @@ func loadRepos() {
 		index, _ = bleve.NewMemOnly(bmap)
 	}
 
-	for repo, _ := range viper.GetStringMap("repos") {
+	for repo := range viper.GetStringMap("repos") {
 		loadRepo(repo)
 	}
 }
@@ -672,10 +576,10 @@ func loadItem(repoName string, filename string) {
 	var item Item
 
 	file, err := os.Open(filename)
-	defer file.Close()
 	if err != nil {
 		panic(err)
 	}
+	defer file.Close()
 
 	m := front.NewMatter()
 	m.Handle("---", front.YAMLHandler)
@@ -758,7 +662,7 @@ func loadItem(repoName string, filename string) {
 		filestat, _ := os.Stat(filename)
 		item.RawDate = filestat.ModTime().String()
 	}
-	item.Date, err = dateparse.ParseLocal(item.RawDate)
+	item.Date, _ = dateparse.ParseLocal(item.RawDate)
 
 	txn := db.Txn(true)
 	err = txn.Insert("items", item)
@@ -811,7 +715,7 @@ func registerTemplateHelpers() {
 	})
 	raymond.RegisterHelper("more", func(html string, pcount int, options *raymond.Options) string {
 		more := ""
-		re := regexp.MustCompile("<!--\\s*more\\s*-->")
+		re := regexp.MustCompile(`<!--\s*more\s*-->`)
 		split := re.Split(html, -1)
 		if len(split) > 1 {
 			return split[0] + options.Fn()

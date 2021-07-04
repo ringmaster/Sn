@@ -505,6 +505,7 @@ func setupConfig() {
 		fmt.Printf("Loading configuration file: %s\n", snConfigFile)
 		viper.SetConfigFile(snConfigFile)
 	}
+
 	viper.WatchConfig()
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
@@ -514,7 +515,27 @@ func setupConfig() {
 			fmt.Printf("%q", err)
 		}
 	}
+	viper.SetDefault("path", filepath.Dir(viper.ConfigFileUsed()))
 	fmt.Printf("Used configuration file: %s\n", viper.ConfigFileUsed())
+}
+
+func dirExists(dir string) bool {
+	_, err := os.Stat(dir)
+	return !os.IsNotExist(err)
+}
+
+func configPath(shortpath string) string {
+	base, err := filepath.Abs(viper.GetString("path"))
+	if err != nil {
+		panic(fmt.Sprintf("Configpath for %s does not have absolute path at %s", shortpath, viper.GetString("path")))
+	}
+
+	fmt.Printf("configPath: %s %s\n", base, shortpath)
+	base = path.Join(base, shortpath)
+	if !dirExists(base) {
+		panic(fmt.Sprintf("Configpath for %s does not exist at %s", shortpath, base))
+	}
+	return base
 }
 
 func makeDB() {
@@ -623,8 +644,13 @@ func loadRepo(repoName string) {
 			}
 		}(w, itempaths)
 	}
+	repoPath := configPath(viper.GetString(fmt.Sprintf("repos.%s.path", repoName)))
 
-	repoPath := path.Join(viper.GetString("path"), viper.GetString(fmt.Sprintf("repos.%s.path", repoName)))
+	fmt.Printf("Loading repo %s from %s...", repoName, repoPath)
+	if !dirExists(repoPath) {
+		panic(fmt.Sprintf("Repo path %s does not exist", repoPath))
+	}
+
 	err := filepath.Walk(repoPath, func(path string, info os.FileInfo, err error) error {
 		if info.IsDir() {
 			return nil

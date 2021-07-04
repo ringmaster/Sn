@@ -1,0 +1,123 @@
+title = "Sn"
+subtitle = "Tin is Sn"
+paginate = 5
+rooturl = "http://localhost/"
+# ssldomains = ["sn.dev"]
+port = 8080
+path = "welcome"
+# template_path = ""
+# rake_minimum = 5.0
+
+# all paths are relative to this file and represent directories in which files are found
+
+[repos.posts]
+path = "posts"
+
+[routes]
+
+[routes.error_404]
+route = "/_/404"
+template = "404.html.hb"
+status = 404
+
+[routes.00_update]
+route = "/_/webhook"
+handler = "git"
+remote = "asy"
+path = "/Users/owinkler/Projects/asy"
+
+[routes.01_index]
+# route is the URL for the page
+# parameters on the route filter the posts from the specified repo
+route = "/"
+template = "posts.html.hb"
+layout = "layout.html.hb"
+handler = "posts"
+
+[routes.01_index.posts]
+query = "Repo:posts"
+paginate_name = "page"
+paginate_count = 5
+
+[routes.02_static]
+route = "/static/:file"
+path = "static"
+handler = "static"
+
+[routes.02_static_fonts]
+route = "/fonts/:file"
+path = "static/fonts"
+handler = "static"
+
+[routes.02_favicon]
+route = "/favicon.ico"
+handler = "static"
+path = "static"
+file = "favicon.ico"
+
+[routes.03_keybase]
+route = "/keybase.txt"
+path = "static"
+file = "keybase.txt"
+handler = "static"
+
+[routes.04_tag]
+route = "/tag/:category"
+layout = "layout.html.hb"
+template = "posts.html.hb"
+handler = "posts"
+
+[routes.04_tag.posts]
+query = "Categories:\"{{.category}}\""
+paginate_count = 5
+paginate_name = "page"
+
+[routes.05_rss]
+route = "/feed/rss"
+template = "rssp.hb"
+layout = "rss.hb"
+handler = "posts"
+content-type = "application/rss+xml"
+
+[routes.05_rss.posts]
+query = "Repo:posts"
+paginate_name = "page"
+paginate_count = 5
+
+[routes.05_redirect]
+route = "/:year/:month/:day/:slug"
+handler = "redirect"
+redirect = "/{{.slug}}"
+
+[routes.06_pages]
+route = "/page/:slug"
+template = "post.html.hb"
+layout = "layout.html.hb"
+handler = "posts"
+
+[routes.06_pages.posts]
+query = "Slug:\"{{.slug}}\""
+paginate_name = "page"
+paginate_count = 5
+
+[routes.06_pages.pages]
+query = "Repo:pages"
+
+[routes.07_bleve]
+route = "/b/:b"
+template = "posts.html.hb"
+layout = "layout.html.hb"
+
+[routes.08_posts]
+route = "/:slug"
+template = "post.html.hb"
+layout = "layout.html.hb"
+handler = "posts"
+
+[routes.08_posts.posts]
+query = "Slug:\"{{.slug}}\""
+paginate_name = "page"
+paginate_count = 5
+
+[template]
+path = "templates/asy"

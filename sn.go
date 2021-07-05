@@ -245,7 +245,7 @@ func getTemplateFileFromConfig(configPath string, alternative string) string {
 	if template = viper.GetString(configPath); template == "" {
 		template = alternative
 	}
-	return path.Join(viper.GetString("path"), viper.GetString("template_path"), template)
+	return path.Join(viper.GetString("path"), viper.GetString("template_dir"), template)
 }
 
 func renderTemplateFile(filename string, context map[string]interface{}) (string, error) {
@@ -285,19 +285,29 @@ func dirExists(dir string) bool {
 }
 
 func configPath(shortpath string) string {
-	if shortpath[0] == '/' && dirExists(shortpath) {
-		return shortpath
+	configVars := map[string]string{
+		"template_dir": viper.GetString("template_dir"),
+	}
+
+	pathTemplate := template.Must(template.New("").Parse(shortpath))
+	buf := bytes.Buffer{}
+	pathTemplate.Execute(&buf, configVars)
+	var renderedPathTemplate string = buf.String()
+	fmt.Printf("Rendered path template: %#q\n", renderedPathTemplate)
+
+	if renderedPathTemplate[0] == '/' && dirExists(renderedPathTemplate) {
+		return renderedPathTemplate
 	}
 
 	base, err := filepath.Abs(viper.GetString("path"))
 	if err != nil {
-		panic(fmt.Sprintf("Configpath for %s does not have absolute path at %s", shortpath, viper.GetString("path")))
+		panic(fmt.Sprintf("Configpath for %s does not have absolute path at %s", renderedPathTemplate, viper.GetString("path")))
 	}
 
-	fmt.Printf("configPath: %s %s\n", base, shortpath)
-	base = path.Join(base, shortpath)
+	fmt.Printf("configPath: %s %s\n", base, renderedPathTemplate)
+	base = path.Join(base, renderedPathTemplate)
 	if !dirExists(base) {
-		panic(fmt.Sprintf("Configpath for %s does not exist at %s", shortpath, base))
+		panic(fmt.Sprintf("Configpath for %s does not exist at %s", renderedPathTemplate, base))
 	}
 	return base
 }

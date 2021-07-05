@@ -126,6 +126,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 	templatefilename := getTemplateFileFromConfig(fmt.Sprintf("%s.template", routeConfigLocation), "template.html.hb")
 	fmt.Printf("  Rendering template: %s\n", templatefilename)
 	context := viper.GetStringMap(routeConfigLocation)
+	context["config"] = CopyMap(viper.AllSettings())
 	context["pathvars"] = mux.Vars(r)
 	context["params"] = r.URL.Query()
 	context["post"] = nil
@@ -286,9 +287,7 @@ func dirExists(dir string) bool {
 }
 
 func configPath(shortpath string) string {
-	configVars := map[string]string{
-		"template_dir": viper.GetString("template_dir"),
-	}
+	configVars := viper.AllSettings()
 
 	pathTemplate := template.Must(template.New("").Parse(shortpath))
 	buf := bytes.Buffer{}
@@ -618,6 +617,20 @@ func registerTemplateHelpers() {
 	})
 }
 
+func CopyMap(m map[string]interface{}) map[string]interface{} {
+	cp := make(map[string]interface{})
+	for k, v := range m {
+		vm, ok := v.(map[string]interface{})
+		if ok {
+			cp[k] = CopyMap(vm)
+		} else {
+			cp[k] = v
+		}
+	}
+
+	return cp
+}
+
 func catchallHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("Rendering default handler\n")
 	routeName := mux.CurrentRoute(r).GetName()
@@ -626,7 +639,8 @@ func catchallHandler(w http.ResponseWriter, r *http.Request) {
 	templatefilename := getTemplateFileFromConfig(fmt.Sprintf("%s.template", routeConfigLocation), "template.html.hb")
 
 	fmt.Printf("Rendering template: %s\n", templatefilename)
-	context := viper.GetStringMap(routeConfigLocation)
+	context := CopyMap(viper.GetStringMap(routeConfigLocation))
+	context["config"] = CopyMap(viper.AllSettings())
 	context["pathvars"] = mux.Vars(r)
 	context["params"] = r.URL.Query()
 	context["post"] = nil
@@ -669,8 +683,15 @@ func setupRoutes(router *mux.Router) {
 		case "posts":
 			router.HandleFunc(routePath, postHandler).Name(routeName)
 		case "static":
-			dir := configPath(viper.GetString(fmt.Sprintf("%s.dir", routeConfigLocation)))
-			router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, http.FileServer(http.Dir(dir))))
+			if viper.IsSet(fmt.Sprintf("%s.file", routeConfigLocation)) {
+				file := viper.GetString(fmt.Sprintf("%s.file", routeConfigLocation))
+				router.HandleFunc(routePath, func(rw http.ResponseWriter, r *http.Request) {
+					http.ServeFile(rw, r, configPath(file))
+				})
+			} else {
+				dir := configPath(viper.GetString(fmt.Sprintf("%s.dir", routeConfigLocation)))
+				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, http.FileServer(http.Dir(dir))))
+			}
 		case "git":
 			router.HandleFunc(routePath, gitHandler).Name(routeName)
 		case "redirect":

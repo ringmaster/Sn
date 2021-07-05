@@ -117,33 +117,34 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func postHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("Rendering posts handler\n")
 	routeName := mux.CurrentRoute(r).GetName()
+	fmt.Printf("Rendering posts handler for route %s\n", routeName)
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
+	fmt.Printf("  Config location: %s\n", routeConfigLocation)
+
 	layoutfilename := getTemplateFileFromConfig(fmt.Sprintf("%s.layout", routeConfigLocation), "layout.html.hb")
 	templatefilename := getTemplateFileFromConfig(fmt.Sprintf("%s.template", routeConfigLocation), "template.html.hb")
-	fmt.Printf("Rendering template: %s\n", templatefilename)
+	fmt.Printf("  Rendering template: %s\n", templatefilename)
 	context := viper.GetStringMap(routeConfigLocation)
 	context["pathvars"] = mux.Vars(r)
 	context["params"] = r.URL.Query()
 	context["post"] = nil
 
 	pathvars := context["pathvars"]
-	fmt.Printf("Pathvars: %+v\n", pathvars)
+	fmt.Printf("  Pathvars: %+v\n", pathvars)
 
 	// Find the itemquery instances, loop over, assign results to context
-	for outVarName, value := range viper.GetStringMap(routeConfigLocation) {
-		if _, is_map := value.(map[string]interface{}); is_map {
-			query := viper.GetString(fmt.Sprintf("%s.%s.query", routeConfigLocation, outVarName))
-			queryTemplate := template.Must(template.New("").Parse(query))
-			buf := bytes.Buffer{}
-			queryTemplate.Execute(&buf, pathvars)
-			var renderedQuery string = buf.String()
-			fmt.Printf("Rendered Query: %#v\n", renderedQuery)
-			itemResult := itemsFromQuery(renderedQuery, context)
+	for outVarName := range viper.GetStringMap(fmt.Sprintf("%s.out", routeConfigLocation)) {
+		fmt.Printf("  Fetching data for %s\n", outVarName)
+		query := viper.GetString(fmt.Sprintf("%s.out.%s.query", routeConfigLocation, outVarName))
+		queryTemplate := template.Must(template.New("").Parse(query))
+		buf := bytes.Buffer{}
+		queryTemplate.Execute(&buf, pathvars)
+		var renderedQuery string = buf.String()
+		fmt.Printf("    Rendered Query: %#v\n", renderedQuery)
+		itemResult := itemsFromQuery(renderedQuery, context)
 
-			context[outVarName] = itemResult
-		}
+		context[outVarName] = itemResult
 	}
 
 	context["mime"] = "text/html"
@@ -153,16 +154,16 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 
 	rendered, err := renderTemplateFile(templatefilename, context)
 	if err != nil {
-		fmt.Printf("Error rendering template: %s\n", err)
+		fmt.Printf("  Error rendering template: %s\n", err)
 		context["content"] = fmt.Sprintf("<div class=\"notification is-danger\">Error rendering template: %s</div>\n", err)
 	} else {
 		context["content"] = rendered
 	}
-	fmt.Printf("Rendering layout: %s\n", layoutfilename)
+	fmt.Printf("  Rendering layout: %s\n", layoutfilename)
 
 	layoutRendered, err := renderTemplateFile(layoutfilename, context)
 	if err != nil {
-		fmt.Printf("Error rendering layout: %s\n", err)
+		fmt.Printf("  Error rendering layout: %s\n", err)
 		context["content"] = fmt.Sprintf("<div class=\"notification is-danger\">Error rendering layout: %s</div>\n", err)
 		layoutRendered = "<html>" + context["content"].(string) + "</html>"
 	}

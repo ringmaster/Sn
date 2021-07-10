@@ -90,7 +90,7 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var sshAuth *ssh.PublicKeys
-	sshPath, err := filepath.Abs(viper.GetString(fmt.Sprintf("%s.keyfile", routeConfigLocation)))
+	sshPath, err := filepath.Abs(configPath(viper.GetString(fmt.Sprintf("%s.keyfile", routeConfigLocation))))
 	if err != nil {
 		fmt.Println(err)
 	}

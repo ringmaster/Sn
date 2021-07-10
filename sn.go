@@ -27,6 +27,7 @@ import (
 	"github.com/blevesearch/bleve/v2/analysis/analyzer/keyword"
 	"github.com/gernest/front"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/go-http-utils/etag"
 	"github.com/gomarkdown/markdown"
 	"github.com/gomarkdown/markdown/html"
@@ -88,6 +89,13 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 		remote = "origin"
 	}
 
+	var sshAuth *ssh.PublicKeys
+	sshPath := os.Getenv("HOME") + "/.ssh/id_rsa"
+	sshAuth, err := ssh.NewPublicKeysFromFile("git", sshPath, "")
+	if err != nil {
+		fmt.Println(err)
+	}
+
 	repo, err := git.PlainOpen(path)
 	if err != nil {
 		fmt.Printf("Git PlainOpen (%s): %#v\n", path, err)
@@ -96,7 +104,10 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Printf("Git Worktree: %#v\n", err)
 	}
-	err = worktree.Pull(&git.PullOptions{RemoteName: remote})
+	err = worktree.Pull(&git.PullOptions{
+		RemoteName: remote,
+		Auth:       sshAuth,
+	})
 	if err != nil {
 		fmt.Printf("Git PullOptions: %#v\n", err)
 	}

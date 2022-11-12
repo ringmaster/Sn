@@ -1,0 +1,42 @@
+title: Sn
+subtitle: Sn is Tin
+paginate: 5
+rooturl: 'http://localhost/'
+port: 8080
+path: welcome
+template:
+  path: templates/asy
+repos:
+  posts:
+    path: posts
+routes:
+  01_index:
+    path: /
+    template: posts.html.hb
+    layout: layout.html.hb
+    handler: posts
+    posts:
+      query: 'Repo:posts'
+      paginate_name: page
+      paginate_count: 5
+  02_static:
+    handler: static
+    path: /static
+    dir: static
+  02_posts:
+    path: /posts/{slug}
+    template: posts.html.hb
+    layout: layout.html.hb
+    handler: posts
+    posts:
+      query: 'Slug:"{{.slug}}"'
+      paginate_name: page
+      paginate_count: 5
+  99_debug:
+    path: /_/debug
+    handler: debug
+  00_update:
+    path: /_/webhook
+    handler: git
+    remote: asy
+    dir: /Users/ringmaster/Projects/Sn

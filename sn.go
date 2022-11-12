@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/ringmaster/Sn/sn"
+
 	"bytes"
 	"crypto/tls"
 	"fmt"
@@ -74,23 +76,19 @@ type Author struct {
 var db *memdb.MemDB
 
 var index bleve.Index
+var router *mux.Router
 
 func gitHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("Rendering git handler\n")
 
 	routeName := mux.CurrentRoute(r).GetName()
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
-	var remote string
 
-	path := configPath(viper.GetString(fmt.Sprintf("%s.dir", routeConfigLocation)))
-	if viper.IsSet(fmt.Sprintf("%s.remote", routeConfigLocation)) {
-		remote = viper.GetString(fmt.Sprintf("%s.remote", routeConfigLocation))
-	} else {
-		remote = "origin"
-	}
+	path := sn.ConfigPath(fmt.Sprintf("%s.dir", routeConfigLocation))
+	remote := sn.ConfigStringDefault(fmt.Sprintf("%s.remote", routeConfigLocation), "origin")
 
 	var sshAuth *ssh.PublicKeys
-	sshPath, err := filepath.Abs(configPath(viper.GetString(fmt.Sprintf("%s.keyfile", routeConfigLocation))))
+	sshPath, err := filepath.Abs(sn.ConfigPath(fmt.Sprintf("%s.keyfile", routeConfigLocation)))
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -128,6 +126,47 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
 
 	w.Write([]byte(commit.Hash.String() + ": " + commit.Message))
+}
+
+func debugHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("Rendering debug handler\n")
+
+	routeName := mux.CurrentRoute(r).GetName()
+	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
+
+	output := "*** Sn DEBUG INFO ***\n"
+	output += "\n"
+	output += fmt.Sprintf("Config File: %s\n", viper.ConfigFileUsed())
+	output += fmt.Sprintf("routeName: %s\nrouteConfigLocation: %s\n", routeName, routeConfigLocation)
+	output += "\n"
+
+	router.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
+		pathTemplate, err := route.GetPathTemplate()
+		if err == nil {
+			output += fmt.Sprintln("ROUTE: ", pathTemplate)
+		}
+		pathRegexp, err := route.GetPathRegexp()
+		if err == nil {
+			output += fmt.Sprintln("Path regexp: ", pathRegexp)
+		}
+		queriesTemplates, err := route.GetQueriesTemplates()
+		if err == nil {
+			output += fmt.Sprintln("Queries templates: ", strings.Join(queriesTemplates, ","))
+		}
+		queriesRegexps, err := route.GetQueriesRegexp()
+		if err == nil {
+			output += fmt.Sprintln("Queries regexps: ", strings.Join(queriesRegexps, ","))
+		}
+		methods, err := route.GetMethods()
+		if err == nil {
+			output += fmt.Sprintln("Methods: ", strings.Join(methods, ","))
+		}
+		output += "\n"
+		return nil
+	})
+
+	w.Header().Add("Content-Type", "text/plain")
+	w.Write([]byte(output))
 }
 
 func postHandler(w http.ResponseWriter, r *http.Request) {
@@ -192,18 +231,6 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
 
 	w.Write([]byte(layoutRendered))
-}
-
-func MinOf(vars ...int) int {
-	min := vars[0]
-
-	for _, i := range vars {
-		if min > i {
-			min = i
-		}
-	}
-
-	return min
 }
 
 // @todo refactor this to use specific tuple values instead of the full context?
@@ -271,59 +298,6 @@ func renderTemplateFile(filename string, context map[string]interface{}) (string
 	}
 
 	return raymond.Render(string(file), context)
-}
-
-func setupConfig() {
-	viper.SetConfigName("sn")
-	viper.SetConfigType("toml")
-	viper.AddConfigPath(".")
-	if snConfigFile := os.Getenv("SN_CONFIG"); snConfigFile != "" {
-		fmt.Printf("Loading configuration file: %s\n", snConfigFile)
-		viper.SetConfigFile(snConfigFile)
-	}
-
-	viper.WatchConfig()
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			fmt.Println("Could not find configuration file")
-		} else {
-			fmt.Println("Error while loading configuration file")
-			fmt.Printf("%q", err)
-		}
-	}
-	viper.SetDefault("path", filepath.Dir(viper.ConfigFileUsed()))
-	fmt.Printf("Used configuration file: %s\n", viper.ConfigFileUsed())
-}
-
-func dirExists(dir string) bool {
-	_, err := os.Stat(dir)
-	return !os.IsNotExist(err)
-}
-
-func configPath(shortpath string) string {
-	configVars := viper.AllSettings()
-
-	pathTemplate := template.Must(template.New("").Parse(shortpath))
-	buf := bytes.Buffer{}
-	pathTemplate.Execute(&buf, configVars)
-	var renderedPathTemplate string = buf.String()
-	fmt.Printf("Rendered path template: %#q\n", renderedPathTemplate)
-
-	if renderedPathTemplate[0] == '/' && dirExists(renderedPathTemplate) {
-		return renderedPathTemplate
-	}
-
-	base, err := filepath.Abs(viper.GetString("path"))
-	if err != nil {
-		panic(fmt.Sprintf("Configpath for %s does not have absolute path at %s", renderedPathTemplate, viper.GetString("path")))
-	}
-
-	fmt.Printf("configPath: %s %s\n", base, renderedPathTemplate)
-	base = path.Join(base, renderedPathTemplate)
-	if !dirExists(base) {
-		panic(fmt.Sprintf("Configpath for %s does not exist at %s", renderedPathTemplate, base))
-	}
-	return base
 }
 
 func makeDB() {
@@ -432,10 +406,10 @@ func loadRepo(repoName string) {
 			}
 		}(w, itempaths)
 	}
-	repoPath := configPath(viper.GetString(fmt.Sprintf("repos.%s.path", repoName)))
+	repoPath := sn.ConfigPath(fmt.Sprintf("repos.%s.path", repoName))
 
 	fmt.Printf("Loading repo %s from %s...", repoName, repoPath)
-	if !dirExists(repoPath) {
+	if !sn.DirExists(repoPath) {
 		panic(fmt.Sprintf("Repo path %s does not exist", repoPath))
 	}
 
@@ -698,14 +672,16 @@ func setupRoutes(router *mux.Router) {
 			if viper.IsSet(fmt.Sprintf("%s.file", routeConfigLocation)) {
 				file := viper.GetString(fmt.Sprintf("%s.file", routeConfigLocation))
 				router.HandleFunc(routePath, func(rw http.ResponseWriter, r *http.Request) {
-					http.ServeFile(rw, r, configPath(file))
+					http.ServeFile(rw, r, sn.ConfigPath(file))
 				})
 			} else {
-				dir := configPath(viper.GetString(fmt.Sprintf("%s.dir", routeConfigLocation)))
+				dir := sn.ConfigPath(fmt.Sprintf("%s.dir", routeConfigLocation))
 				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, http.FileServer(http.Dir(dir))))
 			}
 		case "git":
 			router.HandleFunc(routePath, gitHandler).Name(routeName)
+		case "debug":
+			router.HandleFunc(routePath, debugHandler).Name(routeName)
 		case "redirect":
 		default:
 			router.PathPrefix("/").HandlerFunc(catchallHandler)
@@ -714,11 +690,11 @@ func setupRoutes(router *mux.Router) {
 }
 
 func main() {
-	setupConfig()
+	sn.ConfigSetup()
 	makeDB()
 	loadRepos()
 	registerTemplateHelpers()
-	router := mux.NewRouter()
+	router = mux.NewRouter()
 	setupRoutes(router)
 
 	http.Handle("/", etag.Handler(handlers.CompressHandler(router), false))
@@ -741,7 +717,7 @@ func main() {
 		fmt.Printf("Starting TLS HTTPS server on localhost, and HTTP server for LetsEncrypt.\n")
 		log.Fatal(server.ListenAndServeTLS("", ""))
 	} else {
-		fmt.Printf("Starting HTTP server on localhost:%d\n", viper.GetInt("port"))
+		fmt.Printf("Starting HTTP server on http://localhost:%d\n", viper.GetInt("port"))
 		log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", viper.GetInt("port")), nil))
 	}
 

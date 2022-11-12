@@ -5,5 +5,10 @@
 }
 
 :root {
-  --accent: red;
+  --accent: #0D2AF5;
+}
+
+body>header>h1 {
+  background-image: url(/static/favicon.svg);
+  text-indent: -3000px;
 }

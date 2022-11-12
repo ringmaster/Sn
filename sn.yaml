@@ -15,10 +15,11 @@ routes:
     template: posts.html.hb
     layout: layout.html.hb
     handler: posts
-    posts:
-      query: 'Repo:posts'
-      paginate_name: page
-      paginate_count: 5
+    out:
+      posts:
+        query: 'Repo:posts'
+        paginate_name: page
+        paginate_count: 5
   02_static:
     handler: static
     path: /static
@@ -28,10 +29,11 @@ routes:
     template: posts.html.hb
     layout: layout.html.hb
     handler: posts
-    posts:
-      query: 'Slug:"{{.slug}}"'
-      paginate_name: page
-      paginate_count: 5
+    out:
+      posts:
+        query: 'Slug:"{{.slug}}"'
+        paginate_name: page
+        paginate_count: 5
   99_debug:
     path: /_/debug
     handler: debug

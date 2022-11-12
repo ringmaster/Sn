@@ -18,13 +18,11 @@
     </header>
     <main>
         <section id="posts">
-            <article>
-                <p>Here's some stuff.</p>
-            </article>
+            {{{content}}}
         </section>
     </section>
     <footer>
-        <p>A footer goes here.</p>
+        <p>Thanks for trying <a href="https://github.com/ringmaster/Sn/">Sn</a>.</p>
     </footer>
   </body>
 </html>

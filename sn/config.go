@@ -40,7 +40,52 @@ func ConfigStringDefault(configLocation string, defaultVal string) string {
 	}
 }
 
-func ConfigPath(shortpath string) string {
+type ConfigPathOptions struct {
+	HasDefault bool
+	Default    string
+	MustExist  bool
+}
+
+type ConfigPathOptionFn func(f *ConfigPathOptions)
+
+func WithDefault(def string) ConfigPathOptionFn {
+	return func(f *ConfigPathOptions) {
+		f.HasDefault = true
+		f.Default = def
+	}
+}
+
+func MustExist() ConfigPathOptionFn {
+	return func(f *ConfigPathOptions) {
+		f.MustExist = true
+	}
+}
+
+func OptionallyExist() ConfigPathOptionFn {
+	return func(f *ConfigPathOptions) {
+		f.MustExist = false
+	}
+}
+
+func ConfigPath(shortpath string, opts ...ConfigPathOptionFn) string {
+	options := &ConfigPathOptions{
+		HasDefault: false,
+		Default:    "",
+		MustExist:  true,
+	}
+
+	for _, applyOpt := range opts {
+		applyOpt(options)
+	}
+
+	if !viper.IsSet(shortpath) {
+		if options.HasDefault {
+			return options.Default
+		} else {
+			panic(fmt.Sprintf("Required config value for %s is not set in settings yaml", shortpath))
+		}
+	}
+
 	longpath := viper.GetString(shortpath)
 
 	configVars := viper.AllSettings()
@@ -62,7 +107,7 @@ func ConfigPath(shortpath string) string {
 
 	fmt.Printf("configPath: %s %s\n", base, renderedPathTemplate)
 	base = path.Join(base, renderedPathTemplate)
-	if !DirExists(base) {
+	if options.MustExist && !DirExists(base) {
 		panic(fmt.Sprintf("Configpath for %s does not exist at %s", renderedPathTemplate, base))
 	}
 	return base

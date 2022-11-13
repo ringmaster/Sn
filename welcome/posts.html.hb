@@ -2,7 +2,7 @@
 {{#with this}}
 <article>
     <header>
-        <h2 class="title"><a href="/{{slug}}">{{title}}</a></h2>
+        <h2 class="title"><a href="/posts/{{slug}}">{{title}}</a></h2>
         <p>{{dateformat date "January 02, 2006"}}</p>
         {{#if categories}}
         <div class="tags">

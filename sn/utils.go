@@ -20,3 +20,15 @@ func MinOf(vars ...int) int {
 
 	return min
 }
+
+func CopyMap(m map[string]interface{}) map[string]interface{} {
+	cp := make(map[string]interface{})
+	for k, v := range m {
+		_, ok := v.(map[string]interface{})
+		if !ok {
+			cp[k] = v
+		}
+	}
+
+	return cp
+}

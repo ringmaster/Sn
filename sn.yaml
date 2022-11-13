@@ -4,11 +4,13 @@ paginate: 5
 rooturl: 'http://localhost/'
 port: 8080
 path: welcome
+dbfile: 'test.db'
 template:
   path: templates/asy
 repos:
   posts:
     path: posts
+    #path: /Users/ringmaster/Projects/asy/posts
 routes:
   01_index:
     path: /
@@ -17,7 +19,8 @@ routes:
     handler: posts
     out:
       posts:
-        query: 'Repo:posts'
+        query: '1'
+        sql: 'Repo:posts'
         paginate_name: page
         paginate_count: 5
   02_static:
@@ -31,7 +34,8 @@ routes:
     handler: posts
     out:
       posts:
-        query: 'Slug:"{{.slug}}"'
+        query: 'slug = "{{.slug}}"'
+        sql: 'Slug:"{{.slug}}"'
         paginate_name: page
         paginate_count: 5
   99_debug:

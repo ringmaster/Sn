@@ -259,6 +259,31 @@ func loadItem(repoName string, filename string) (Item, error) {
 	}
 	item.Authors = authors
 
+	// Get frontmatter from frontmatter
+	item.Frontmatter = make(map[string]string)
+	for fk, fv := range f {
+		switch fk {
+		case "authors", "categories", "slug", "title", "date":
+		default:
+			switch fv.(interface{}).(type) {
+			case string:
+				item.Frontmatter[fk] = fv.(string)
+			case int:
+				item.Frontmatter[fk] = fmt.Sprint(fv.(int))
+			case float64:
+				item.Frontmatter[fk] = fmt.Sprint(fv.(float64))
+			case bool:
+				if fv.(bool) {
+					item.Frontmatter[fk] = "true"
+				} else {
+					item.Frontmatter[fk] = "false"
+				}
+			default:
+				// do nothing, sadly
+			}
+		}
+	}
+
 	// Get a real date from frontmatter or from filesystem
 	if _, ok := f["date"]; ok {
 		item.RawDate = f["date"].(string)
@@ -293,6 +318,7 @@ func insertItem(item Item) (int64, error) {
 
 	insertCategories(item)
 	insertAuthors(item)
+	insertFrontmatter(item)
 
 	return item.Id, nil
 }
@@ -342,6 +368,13 @@ func insertAuthors(item Item) {
 	for _, author_id := range authormap {
 		stmt, _ := db.Prepare("INSERT INTO items_authors (item_id, author_id) VALUES (?, ?)")
 		stmt.Exec(item.Id, author_id)
+	}
+}
+
+func insertFrontmatter(item Item) {
+	for k, v := range item.Frontmatter {
+		stmt, _ := db.Prepare("INSERT INTO frontmatter (item_id, fieldname, value) VALUES (?,?,?)")
+		stmt.Exec(item.Id, k, v)
 	}
 }
 

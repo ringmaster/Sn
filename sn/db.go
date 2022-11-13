@@ -58,12 +58,12 @@ func schema() string {
 	  
 	  CREATE UNIQUE INDEX IF NOT EXISTS authors_author ON "authors" ("author" ASC);
 	  
-	  CREATE TABLE IF NOT EXISTS "tags" (
+	  CREATE TABLE IF NOT EXISTS "categories" (
 		"id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-		"tag" varchar(128) NOT NULL
+		"category" varchar(128) NOT NULL
 	  );
 	  
-	  CREATE UNIQUE INDEX IF NOT EXISTS tags_tag ON "tags" ("tag" ASC);
+	  CREATE UNIQUE INDEX IF NOT EXISTS categories_category ON "categories" ("category" ASC);
 	  
 	  CREATE TABLE IF NOT EXISTS "frontmatter" (
 		"id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -93,22 +93,28 @@ func schema() string {
 	  
 	  CREATE INDEX IF NOT EXISTS iterms_authors_item_id ON "items_authors" ("item_id" ASC);
 	  
-	  CREATE TABLE IF NOT EXISTS "items_tags" (
+	  CREATE TABLE IF NOT EXISTS "items_categories" (
 		"id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 		"item_id" integer(128),
-		"tag_id" integer(128),
+		"category_id" integer(128),
 		FOREIGN KEY (item_id) REFERENCES "items" (id),
-		FOREIGN KEY (tag_id) REFERENCES "tags" (id)
+		FOREIGN KEY (category_id) REFERENCES "categories" (id)
 	  );
 	  
-	  CREATE INDEX IF NOT EXISTS items_tags_item_id ON "items_tags" ("item_id" ASC);
+	  CREATE INDEX IF NOT EXISTS items_categories_item_id ON "items_categories" ("item_id" ASC);
 	  
-	  CREATE INDEX IF NOT EXISTS items_tags_tag_id ON "items_tags" ("tag_id" ASC);	  
+	  CREATE INDEX IF NOT EXISTS items_categories_category_id ON "items_categories" ("category_id" ASC);	  
 	`
 }
 
 func DBConnect() {
 	dbfile := ConfigPath("dbfile", WithDefault(":memory:"), OptionallyExist())
+
+	if viper.IsSet("cleandb") && viper.GetBool("cleandb") {
+		fmt.Printf("DELETING database file %s\n", dbfile)
+		os.Remove(dbfile)
+	}
+
 	var err error
 	db, err = sql.Open("sqlite", dbfile)
 
@@ -137,7 +143,12 @@ func DBLoadRepo(repoName string) {
 	for w := 0; w < workers; w++ {
 		go func(id int, itempaths <-chan string) {
 			for path := range itempaths {
-				loadItem(repoName, path)
+				item, err := loadItem(repoName, path)
+				if err == nil {
+					insertItem(item)
+				} else {
+					fmt.Println(err)
+				}
 			}
 		}(w, itempaths)
 	}
@@ -165,8 +176,10 @@ func DBLoadRepo(repoName string) {
 	//startWatching(repoPath, repoName)
 }
 
-func loadItem(repoName string, filename string) {
+func loadItem(repoName string, filename string) (Item, error) {
 	var item Item
+
+	item.Source = filename
 
 	file, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -178,7 +191,7 @@ func loadItem(repoName string, filename string) {
 
 	fmt.Println(filename)
 	if len(file) < 3 {
-		return
+		return item, fmt.Errorf("the file %s is too short to have frontmatter", filename)
 	}
 
 	f, body, err := m.Parse(bytes.NewReader(file))
@@ -208,23 +221,19 @@ func loadItem(repoName string, filename string) {
 		opts := html.RendererOptions{Flags: htmlFlags}
 		renderer := html.NewRenderer(opts)
 		item.Html = string(markdown.ToHTML(md, parser, renderer))
-		//item.Html = string(blackfriday.Run([]byte(body), blackfriday.WithExtensions(blackfriday.CommonExtensions|blackfriday.HardLineBreak)))
 	}
 
+	// Get Categories from frontmatter
 	var categories []string
-	var authors []string
-	var arr []interface{}
 	if _, ok := f["categories"]; ok {
-		arr = f["categories"].([]interface{})
+		arr := f["categories"].([]interface{})
 		categories = make([]string, len(arr))
 		for i, v := range arr {
 			categories[i] = fmt.Sprint(v)
-			category := new(Category)
-			category.Name = fmt.Sprint(v)
-			category.Count = 1
 		}
 	}
 
+	// Optionally derive categories from item content
 	if viper.IsSet("rake_minimum") {
 		rakes := rake.WithText(body)
 		keys := make([]string, 0, len(rakes))
@@ -237,21 +246,20 @@ func loadItem(repoName string, filename string) {
 		categories = append(categories, keys...)
 	}
 
-	for _, category := range categories {
-		stmt, _ := db.Prepare("INSERT INTO tags (tag) VALUES (?)")
-		stmt.Exec(category)
-	}
-
 	item.Categories = categories
+
+	// Get authors from frontmatter
+	var authors []string
 	if _, ok := f["authors"]; ok {
-		arr = f["authors"].([]interface{})
-		authors := make([]string, len(arr))
+		arr := f["authors"].([]interface{})
+		authors = make([]string, len(arr))
 		for i, v := range arr {
 			authors[i] = fmt.Sprint(v)
 		}
 	}
 	item.Authors = authors
 
+	// Get a real date from frontmatter or from filesystem
 	if _, ok := f["date"]; ok {
 		item.RawDate = f["date"].(string)
 	} else {
@@ -260,7 +268,11 @@ func loadItem(repoName string, filename string) {
 	}
 	item.Date, _ = dateparse.ParseLocal(item.RawDate)
 
-	_, err = db.Query(
+	return item, nil
+}
+
+func insertItem(item Item) (int64, error) {
+	result, err := db.Exec(
 		"INSERT INTO items (slug, repo, publishedon, rawpublishedon, raw, html, source, title) VALUES (?,?,?,?,?,?,?,?)",
 		item.Slug,
 		item.Repo,
@@ -268,12 +280,68 @@ func loadItem(repoName string, filename string) {
 		item.RawDate,
 		item.Raw,
 		item.Html,
-		filename,
+		item.Source,
 		item.Title,
 	)
 
 	if err != nil {
 		fmt.Printf("Error inserting item \"%s\": %s\n", item.Slug, err)
+		return 0, fmt.Errorf("error inserting item \"%s\": %s", item.Slug, err)
+	}
+
+	item.Id, _ = result.LastInsertId()
+
+	insertCategories(item)
+	insertAuthors(item)
+
+	return item.Id, nil
+}
+
+func insertCategories(item Item) {
+	var categorymap map[string]int64 = make(map[string]int64, len(item.Categories))
+
+	for _, category := range item.Categories {
+		stmt, _ := db.Prepare("INSERT INTO categories (category) VALUES (?)")
+		result, err := stmt.Exec(category)
+		var category_id int64
+		if err == nil {
+			category_id, err = result.LastInsertId()
+			if err != nil {
+				panic(err)
+			}
+		} else {
+			db.QueryRow("SELECT id FROM categories WHERE category = ?", category).Scan(&category_id)
+		}
+		categorymap[category] = category_id
+	}
+
+	for _, category_id := range categorymap {
+		stmt, _ := db.Prepare("INSERT INTO items_categories (item_id, category_id) VALUES (?, ?)")
+		stmt.Exec(item.Id, category_id)
+	}
+}
+
+func insertAuthors(item Item) {
+	var authormap map[string]int64 = make(map[string]int64, len(item.Authors))
+
+	for _, author := range item.Authors {
+		stmt, _ := db.Prepare("INSERT INTO authors (author) VALUES (?)")
+		result, err := stmt.Exec(author)
+		var author_id int64
+		if err == nil {
+			author_id, err = result.LastInsertId()
+			if err != nil {
+				panic(err)
+			}
+		} else {
+			db.QueryRow("SELECT id FROM authors WHERE author = ?", author).Scan(&author_id)
+		}
+		authormap[author] = author_id
+	}
+
+	for _, author_id := range authormap {
+		stmt, _ := db.Prepare("INSERT INTO items_authors (item_id, author_id) VALUES (?, ?)")
+		stmt.Exec(item.Id, author_id)
 	}
 }
 

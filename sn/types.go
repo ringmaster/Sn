@@ -13,6 +13,8 @@ type Item struct {
 	RawDate    string
 	Raw        string
 	Html       string
+	Source     string
+	Id         int64
 }
 
 type ItemResult struct {

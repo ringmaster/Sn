@@ -5,6 +5,7 @@ rooturl: 'http://localhost/'
 port: 8080
 path: welcome
 dbfile: 'test.db'
+cleandb: true
 template:
   path: templates/asy
 repos:

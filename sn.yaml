@@ -30,7 +30,7 @@ routes:
     dir: static
   02_posts:
     path: /posts/{slug}
-    template: posts.html.hb
+    template: post.html.hb
     layout: layout.html.hb
     handler: posts
     out:

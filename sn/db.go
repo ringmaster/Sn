@@ -18,12 +18,15 @@ import (
 
 	"github.com/araddon/dateparse"
 	"github.com/arpitgogia/rake"
-	"github.com/gernest/front"
-	"github.com/gomarkdown/markdown"
-	"github.com/gomarkdown/markdown/html"
-	"github.com/gomarkdown/markdown/parser"
 	"github.com/radovskyb/watcher"
 	"github.com/spf13/viper"
+	"github.com/yuin/goldmark"
+	emoji "github.com/yuin/goldmark-emoji"
+	highlighting "github.com/yuin/goldmark-highlighting/v2"
+	meta "github.com/yuin/goldmark-meta"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer/html"
 
 	_ "modernc.org/sqlite"
 	//_ "github.com/mattn/go-sqlite3"
@@ -173,7 +176,26 @@ func DBLoadRepo(repoName string) {
 		panic(err)
 	}
 	close(itempaths)
-	//startWatching(repoPath, repoName)
+	startWatching(repoPath, repoName)
+}
+
+func reloadItem(repoName string, filename string) (Item, error) {
+	var item_id int64
+	if err := db.QueryRow("SELECT id FROM items WHERE repo = ? and source = ?", repoName, filename).Scan(&item_id); err == nil && item_id > 0 {
+		fmt.Printf("Deleted item id %d for %s source file %s\n", item_id, repoName, filename)
+		db.Exec("DELETE FROM items_tags WHERE item_id = ?", item_id)
+		db.Exec("DELETE FROM items_authors WHERE item_id = ?", item_id)
+		db.Exec("DELETE FROM frontmatter WHERE item_id = ?", item_id)
+		db.Exec("DELETE FROM items WHERE repo = ? and source = ?", repoName, filename)
+	} else {
+		fmt.Printf("No existing file in repo %s source file %s\n", repoName, filename)
+	}
+
+	item, err := loadItem(repoName, filename)
+	if err == nil {
+		insertItem(item)
+	}
+	return item, err
 }
 
 func loadItem(repoName string, filename string) (Item, error) {
@@ -186,17 +208,34 @@ func loadItem(repoName string, filename string) (Item, error) {
 		panic(err)
 	}
 
-	m := front.NewMatter()
-	m.Handle("---", front.YAMLHandler)
+	var buf bytes.Buffer
+	md := goldmark.New(
+		goldmark.WithExtensions(
+			extension.GFM,
+			meta.New(
+				meta.WithStoresInDocument(),
+			),
+			emoji.Emoji,
+			highlighting.Highlighting,
+		),
+		goldmark.WithParserOptions(
+			parser.WithAutoHeadingID(),
+			parser.WithAttribute(),
+		),
+		goldmark.WithRendererOptions(
+			html.WithHardWraps(),
+			html.WithUnsafe(),
+		),
+	)
+	context := parser.NewContext()
+	if err := md.Convert(file, &buf, parser.WithContext(context)); err != nil {
+		panic(err)
+	}
+	f := meta.Get(context)
 
 	fmt.Println(filename)
 	if len(file) < 3 {
 		return item, fmt.Errorf("the file %s is too short to have frontmatter", filename)
-	}
-
-	f, body, err := m.Parse(bytes.NewReader(file))
-	if err != nil {
-		panic(err)
 	}
 
 	item.Title = f["title"].(string)
@@ -205,22 +244,14 @@ func loadItem(repoName string, filename string) (Item, error) {
 	} else {
 		item.Slug = path.Base(filename)
 	}
-	item.Raw = body
+	item.Raw = string(file[:])
 	item.Repo = repoName
 
 	ishtml, ok := f["html"]
 	if ok && ishtml.(bool) {
-		item.Html = body
+		item.Html = item.Raw
 	} else {
-		extensions := parser.CommonExtensions | parser.AutoHeadingIDs | parser.Mmark | parser.Footnotes | parser.AutoHeadingIDs | parser.Attributes | parser.DefinitionLists
-		parser := parser.NewWithExtensions(extensions)
-
-		md := []byte(body)
-
-		htmlFlags := html.CommonFlags | html.HrefTargetBlank | html.FootnoteReturnLinks
-		opts := html.RendererOptions{Flags: htmlFlags}
-		renderer := html.NewRenderer(opts)
-		item.Html = string(markdown.ToHTML(md, parser, renderer))
+		item.Html = buf.String()
 	}
 
 	// Get Categories from frontmatter
@@ -235,7 +266,7 @@ func loadItem(repoName string, filename string) (Item, error) {
 
 	// Optionally derive categories from item content
 	if viper.IsSet("rake_minimum") {
-		rakes := rake.WithText(body)
+		rakes := rake.WithText(string(file[:]))
 		keys := make([]string, 0, len(rakes))
 		for k := range rakes {
 			if rakes[k] > viper.GetFloat64("rake_minimum") {
@@ -265,15 +296,13 @@ func loadItem(repoName string, filename string) (Item, error) {
 		switch fk {
 		case "authors", "categories", "slug", "title", "date":
 		default:
-			switch fv.(interface{}).(type) {
+			switch zz := fv.(type) {
 			case string:
-				item.Frontmatter[fk] = fv.(string)
-			case int:
-				item.Frontmatter[fk] = fmt.Sprint(fv.(int))
-			case float64:
-				item.Frontmatter[fk] = fmt.Sprint(fv.(float64))
+				item.Frontmatter[fk] = zz
+			case int, float64:
+				item.Frontmatter[fk] = fmt.Sprint(zz)
 			case bool:
-				if fv.(bool) {
+				if zz {
 					item.Frontmatter[fk] = "true"
 				} else {
 					item.Frontmatter[fk] = "false"
@@ -315,6 +344,8 @@ func insertItem(item Item) (int64, error) {
 	}
 
 	item.Id, _ = result.LastInsertId()
+
+	fmt.Printf("Inserted item \"%s\" at ID %d\n", item.Slug, item.Id)
 
 	insertCategories(item)
 	insertAuthors(item)
@@ -391,7 +422,7 @@ func startWatching(path string, repoName string) {
 			select {
 			case event := <-w.Event:
 				fmt.Println(event) // Print the event's info.
-				loadItem(repoName, event.Path)
+				reloadItem(repoName, event.Path)
 			case err := <-w.Error:
 				log.Fatalln(err)
 			case <-w.Closed:

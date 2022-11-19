@@ -23,6 +23,10 @@ require (
 	github.com/shurcooL/sanitized_anchor_name v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/spf13/viper v1.7.1
+	github.com/yuin/goldmark v1.5.3
+	github.com/yuin/goldmark-emoji v1.0.1
+	github.com/yuin/goldmark-highlighting/v2 v2.0.0-20220924101305-151362477c87 // indirect
+	github.com/yuin/goldmark-meta v1.1.0
 	golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
 	gopkg.in/yaml.v2 v2.3.0 // indirect
 	modernc.org/sqlite v1.19.4

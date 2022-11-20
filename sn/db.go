@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/araddon/dateparse"
@@ -233,7 +234,7 @@ func loadItem(repoName string, filename string) (Item, error) {
 	}
 	f := meta.Get(context)
 
-	fmt.Println(filename)
+	//fmt.Println(filename)
 	if len(file) < 3 {
 		return item, fmt.Errorf("the file %s is too short to have frontmatter", filename)
 	}
@@ -345,7 +346,7 @@ func insertItem(item Item) (int64, error) {
 
 	item.Id, _ = result.LastInsertId()
 
-	fmt.Printf("Inserted item \"%s\" at ID %d\n", item.Slug, item.Id)
+	//fmt.Printf("Inserted item \"%s\" at ID %d\n", item.Slug, item.Id)
 
 	insertCategories(item)
 	insertAuthors(item)
@@ -445,7 +446,7 @@ func startWatching(path string, repoName string) {
 }
 
 // @todo refactor this to use specific tuple values instead of the full context?
-func ItemsFromQuery(query string, context map[string]interface{}) ItemResult {
+func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interface{}) ItemResult {
 	var items []Item
 	var pg int
 
@@ -460,11 +461,36 @@ func ItemsFromQuery(query string, context map[string]interface{}) ItemResult {
 	if page, ok := pathvars["page"]; ok {
 		pg, _ = strconv.Atoi(page)
 	}
-	//front := (pg - 1) * perPage
+	front := (pg - 1) * perPage
 
-	fmt.Printf("Bleve search \"%s\"\n", query)
+	var sql string = `SELECT distinct items.id, repo, title, slug, publishedon, rawpublishedon, raw, html, source FROM items
+	JOIN items_authors ON items_authors.item_id = items.id
+   JOIN authors ON authors.id = items_authors.author_id
+	JOIN items_categories ON items_categories.item_id = items.id
+   JOIN categories ON categories.id = items_categories.category_id WHERE 1`
+	var ok = false
+	var queryvals []any
 
-	rows, err := db.Query("SELECT id, repo, title, slug, publishedon, rawpublishedon, raw, html, source FROM items WHERE " + query)
+	fmt.Printf("  Outvals: %#v\n", outvals)
+
+	sql, queryvals = andSQL(outvals, "slug", pathvars, sql, queryvals)
+	sql, queryvals = andSQL(outvals, "repo", pathvars, sql, queryvals)
+	sql, queryvals = andSQL(outvals, "category", pathvars, sql, queryvals)
+	sql, queryvals = andSQL(outvals, "author", pathvars, sql, queryvals)
+
+	var orderby string = "ORDER BY publishedon DESC"
+	fmt.Printf("    Order by: %s\n", orderby)
+	orderbyval, ok := outvals["orderby"].(string)
+	if ok {
+		orderby = fmt.Sprintf("ORDER BY %s", orderbyval)
+	}
+	fmt.Printf("    Order by reset: %s\n", orderby)
+
+	sql = fmt.Sprintf("%s %s LIMIT %d, %d", sql, orderby, front, perPage)
+
+	fmt.Printf("    ITEM SEARCH: \"%s\"\n", sql)
+
+	rows, err := db.Query(sql, queryvals...)
 	if err != nil {
 		panic(err)
 	}
@@ -473,20 +499,65 @@ func ItemsFromQuery(query string, context map[string]interface{}) ItemResult {
 	if err != nil {
 		fmt.Printf("Error: %#v", err)
 	}
-	var item Item
+
 	itemCount := 0
 	for rows.Next() {
-		var id int
+		var item Item
 		var source string
 		var interimDate string
-		err = rows.Scan(&id, &item.Repo, &item.Title, &item.Slug, &interimDate, &item.RawDate, &item.RawDate, &item.Html, &source)
+		err = rows.Scan(&item.Id, &item.Repo, &item.Title, &item.Slug, &interimDate, &item.RawDate, &item.RawDate, &item.Html, &source)
+
 		item.Date, _ = dateparse.ParseLocal(interimDate)
 		if err != nil {
 			panic(err)
 		}
+
+		categories, err := db.Query("SELECT category FROM categories INNER JOIN items_categories ON items_categories.category_id = categories.id WHERE items_categories.item_id = ?", item.Id)
+
+		if err != nil {
+			panic(err)
+		}
+
+		//fmt.Printf("Categories for post %d:\n", item.Id)
+		var category string
+		for categories.Next() {
+			categories.Scan(&category)
+			item.Categories = append(item.Categories, category)
+			//fmt.Printf("  %s", category)
+		}
+
+		authors, err := db.Query("SELECT author FROM authors INNER JOIN items_authors ON items_authors.author_id = authors.id WHERE items_authors.item_id = ?", item.Id)
+
+		if err != nil {
+			panic(err)
+		}
+
+		//fmt.Printf("Authors for post %d:\n", item.Id)
+		var author string
+		for authors.Next() {
+			categories.Scan(&author)
+			item.Authors = append(item.Authors, author)
+			//fmt.Printf("  %s", author)
+		}
+
 		items = append(items, item)
 		itemCount++
 	}
 
 	return ItemResult{Items: items, Total: int(itemCount), Pages: int(math.Ceil(float64(itemCount) / float64(perPage))), Page: pg}
+}
+
+func replaceParams(temp string, params map[string]string) string {
+	for k, v := range params {
+		temp = strings.ReplaceAll(temp, fmt.Sprintf("{%s}", k), v)
+	}
+	return temp
+}
+
+func andSQL(outvals map[string]interface{}, outvalname string, pathvars map[string]string, sql string, queryvals []any) (string, []any) {
+	if slug, ok := outvals[outvalname].(string); ok {
+		queryvals = append(queryvals, replaceParams(slug, pathvars))
+		sql = fmt.Sprintf("%s AND %s = ?", sql, outvalname)
+	}
+	return sql, queryvals
 }

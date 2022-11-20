@@ -11,7 +11,7 @@ template:
 repos:
   posts:
     path: posts
-    #path: /Users/ringmaster/Projects/asy/posts
+    # path: /Users/ringmaster/Projects/asy/posts
 routes:
   01_index:
     path: /
@@ -20,8 +20,7 @@ routes:
     handler: posts
     out:
       posts:
-        query: '1'
-        sql: 'Repo:posts'
+        repo: posts
         paginate_name: page
         paginate_count: 5
   02_static:
@@ -35,8 +34,17 @@ routes:
     handler: posts
     out:
       posts:
-        query: 'slug = "{{.slug}}"'
-        sql: 'Slug:"{{.slug}}"'
+        repo: posts
+        slug: "{slug}"
+  03_categories:
+    path: /tag/{category}
+    template: posts.html.hb
+    layout: layout.html.hb
+    handler: posts
+    out:
+      posts:
+        repo: posts
+        category: "{category}"
         paginate_name: page
         paginate_count: 5
   99_debug:

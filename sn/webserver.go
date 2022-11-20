@@ -1,7 +1,6 @@
 package sn
 
 import (
-	"bytes"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -9,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"text/template"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
@@ -134,16 +132,9 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 	// Find the itemquery instances, loop over, assign results to context
 	for outVarName := range viper.GetStringMap(fmt.Sprintf("%s.out", routeConfigLocation)) {
 		fmt.Printf("  Fetching data for %s\n", outVarName)
-		qlocation := fmt.Sprintf("%s.out.%s.query", routeConfigLocation, outVarName)
-		query := viper.GetString(qlocation)
-		fmt.Printf("    YAML Query location: %#v\n", qlocation)
-		fmt.Printf("    YAML Query: %#v\n", query)
-		queryTemplate := template.Must(template.New("").Parse(query))
-		buf := bytes.Buffer{}
-		queryTemplate.Execute(&buf, pathvars)
-		var renderedQuery string = buf.String()
-		fmt.Printf("    Rendered Query: %#v\n", renderedQuery)
-		itemResult := ItemsFromQuery(renderedQuery, context)
+		qlocation := fmt.Sprintf("%s.out.%s", routeConfigLocation, outVarName)
+		outvals := viper.GetStringMap(qlocation)
+		itemResult := ItemsFromOutvals(outvals, context)
 
 		context[outVarName] = itemResult
 	}

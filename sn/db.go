@@ -465,9 +465,9 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 
 	var sql string = `SELECT distinct items.id, repo, title, slug, publishedon, rawpublishedon, raw, html, source FROM items
 	LEFT JOIN items_authors ON items.id = items_authors.item_id
-   JOIN authors ON authors.id = items_authors.author_id
+   LEFT JOIN authors ON authors.id = items_authors.author_id
 	LEFT JOIN items_categories ON items.id = items_categories.item_id
-   JOIN categories ON categories.id = items_categories.category_id WHERE 1`
+   LEFT JOIN categories ON categories.id = items_categories.category_id WHERE 1`
 	var ok = false
 	var queryvals []any
 
@@ -488,7 +488,7 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 
 	sql = fmt.Sprintf("%s %s LIMIT %d, %d", sql, orderby, front, perPage)
 
-	fmt.Printf("    ITEM SEARCH: \"%s\"\n", sql)
+	//fmt.Printf("    ITEM SEARCH: \"%s\"\n", sql)
 
 	rows, err := db.Query(sql, queryvals...)
 	if err != nil {

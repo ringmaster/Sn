@@ -464,9 +464,9 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 	front := (pg - 1) * perPage
 
 	var sql string = `SELECT distinct items.id, repo, title, slug, publishedon, rawpublishedon, raw, html, source FROM items
-	JOIN items_authors ON items_authors.item_id = items.id
+	LEFT JOIN items_authors ON items.id = items_authors.item_id
    JOIN authors ON authors.id = items_authors.author_id
-	JOIN items_categories ON items_categories.item_id = items.id
+	LEFT JOIN items_categories ON items.id = items_categories.item_id
    JOIN categories ON categories.id = items_categories.category_id WHERE 1`
 	var ok = false
 	var queryvals []any

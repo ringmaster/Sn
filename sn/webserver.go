@@ -224,9 +224,9 @@ func setupRoutes(router *mux.Router) {
 			router.HandleFunc(routePath, postHandler).Name(routeName)
 		case "static":
 			if viper.IsSet(fmt.Sprintf("%s.file", routeConfigLocation)) {
-				file := viper.GetString(fmt.Sprintf("%s.file", routeConfigLocation))
+				file := ConfigPath(fmt.Sprintf("%s.file", routeConfigLocation), OptionallyExist())
 				router.HandleFunc(routePath, func(rw http.ResponseWriter, r *http.Request) {
-					http.ServeFile(rw, r, ConfigPath(file))
+					http.ServeFile(rw, r, file)
 				})
 			} else {
 				dir := ConfigPath(fmt.Sprintf("%s.dir", routeConfigLocation))

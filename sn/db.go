@@ -463,7 +463,7 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 	}
 	front := (pg - 1) * perPage
 
-	var sql string = `SELECT distinct items.id, repo, title, slug, publishedon, rawpublishedon, raw, html, source FROM items
+	var sql string = `FROM items
 	LEFT JOIN items_authors ON items.id = items_authors.item_id
    LEFT JOIN authors ON authors.id = items_authors.author_id
 	LEFT JOIN items_categories ON items.id = items_categories.item_id
@@ -486,62 +486,68 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 	}
 	fmt.Printf("    Order by reset: %s\n", orderby)
 
-	sql = fmt.Sprintf("%s %s LIMIT %d, %d", sql, orderby, front, perPage)
+	countsql := fmt.Sprintf("SELECT count(distinct items.id) %s", sql)
 
-	//fmt.Printf("    ITEM SEARCH: \"%s\"\n", sql)
+	var itemCount int
+	fmt.Printf("    ITEM COUNT: \"%s\"\n", countsql)
+	db.QueryRow(countsql, queryvals...).Scan(&itemCount)
 
-	rows, err := db.Query(sql, queryvals...)
-	if err != nil {
-		panic(err)
-	}
-	defer rows.Close()
+	if itemCount > 0 {
+		sql = fmt.Sprintf("SELECT distinct items.id, repo, title, slug, publishedon, rawpublishedon, raw, html, source %s %s LIMIT %d, %d", sql, orderby, front, perPage)
 
-	if err != nil {
-		fmt.Printf("Error: %#v", err)
-	}
+		//fmt.Printf("    ITEM SEARCH: \"%s\"\n", sql)
 
-	itemCount := 0
-	for rows.Next() {
-		var item Item
-		var source string
-		var interimDate string
-		err = rows.Scan(&item.Id, &item.Repo, &item.Title, &item.Slug, &interimDate, &item.RawDate, &item.RawDate, &item.Html, &source)
-
-		item.Date, _ = dateparse.ParseLocal(interimDate)
+		rows, err := db.Query(sql, queryvals...)
 		if err != nil {
 			panic(err)
 		}
-
-		categories, err := db.Query("SELECT category FROM categories INNER JOIN items_categories ON items_categories.category_id = categories.id WHERE items_categories.item_id = ?", item.Id)
-
-		if err != nil {
-			panic(err)
-		}
-
-		//fmt.Printf("Categories for post %d:\n", item.Id)
-		var category string
-		for categories.Next() {
-			categories.Scan(&category)
-			item.Categories = append(item.Categories, category)
-			//fmt.Printf("  %s", category)
-		}
-
-		authors, err := db.Query("SELECT author FROM authors INNER JOIN items_authors ON items_authors.author_id = authors.id WHERE items_authors.item_id = ?", item.Id)
+		defer rows.Close()
 
 		if err != nil {
-			panic(err)
+			fmt.Printf("Error: %#v", err)
 		}
 
-		//fmt.Printf("Authors for post %d:\n", item.Id)
-		var author string
-		for authors.Next() {
-			categories.Scan(&author)
-			item.Authors = append(item.Authors, author)
-			//fmt.Printf("  %s", author)
-		}
+		for rows.Next() {
+			var item Item
+			var source string
+			var interimDate string
+			err = rows.Scan(&item.Id, &item.Repo, &item.Title, &item.Slug, &interimDate, &item.RawDate, &item.RawDate, &item.Html, &source)
 
-		items = append(items, item)
-		itemCount++
+			item.Date, _ = dateparse.ParseLocal(interimDate)
+			if err != nil {
+				panic(err)
+			}
+
+			categories, err := db.Query("SELECT category FROM categories INNER JOIN items_categories ON items_categories.category_id = categories.id WHERE items_categories.item_id = ?", item.Id)
+
+			if err != nil {
+				panic(err)
+			}
+
+			//fmt.Printf("Categories for post %d:\n", item.Id)
+			var category string
+			for categories.Next() {
+				categories.Scan(&category)
+				item.Categories = append(item.Categories, category)
+				//fmt.Printf("  %s", category)
+			}
+
+			authors, err := db.Query("SELECT author FROM authors INNER JOIN items_authors ON items_authors.author_id = authors.id WHERE items_authors.item_id = ?", item.Id)
+
+			if err != nil {
+				panic(err)
+			}
+
+			//fmt.Printf("Authors for post %d:\n", item.Id)
+			var author string
+			for authors.Next() {
+				categories.Scan(&author)
+				item.Authors = append(item.Authors, author)
+				//fmt.Printf("  %s", author)
+			}
+
+			items = append(items, item)
+		}
 	}
 
 	return ItemResult{Items: items, Total: int(itemCount), Pages: int(math.Ceil(float64(itemCount) / float64(perPage))), Page: pg}

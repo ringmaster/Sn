@@ -1,7 +1,9 @@
 package sn
 
 import (
+	"fmt"
 	"io/ioutil"
+	"os"
 	"path"
 	"regexp"
 	"strings"
@@ -29,7 +31,40 @@ func RenderTemplateFile(filename string, context map[string]interface{}) (string
 	return raymond.Render(string(file), context)
 }
 
+func RegisterPartials() {
+	templatepath := path.Join(viper.GetString("path"), viper.GetString("template_dir"))
+	files, err := os.ReadDir(templatepath)
+	if err != nil {
+		panic(err)
+	}
+
+	for _, file := range files {
+		fmt.Println(file.Name(), file.IsDir())
+		if !file.IsDir() {
+			template, err := ioutil.ReadFile(path.Join(templatepath, file.Name()))
+			if err != nil {
+				panic(err)
+			}
+			partialname := regexp.MustCompile(`\.`).Split(file.Name(), 2)[0]
+			fmt.Printf("Partial %s built from %s\n", partialname, file.Name())
+			raymond.RegisterPartial(partialname, string(template))
+		}
+	}
+}
+
 func RegisterTemplateHelpers() {
+	raymond.RegisterHelper("keys", func(obj map[string]interface{}) string {
+		result := ``
+		for k, v := range obj {
+			result += fmt.Sprintf("%s: %#v\n", k, v)
+		}
+		return result
+	})
+	raymond.RegisterHelper("string", func(str any) string {
+		fmt.Printf("%#v", str)
+		fmt.Printf("(string) %s\n", str)
+		return fmt.Sprintf("<pre>%s</pre>", str)
+	})
 	raymond.RegisterHelper("dateformat", func(t time.Time, format string) string {
 		return t.Format(format)
 	})

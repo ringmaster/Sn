@@ -9,7 +9,7 @@ port: 8080
 # path - The "root path" for all referenced files here, relative to this file or an absolute path
 path: welcome
 # dbfile - The name of a database file or ':memory:' to use an in-memory database
-dbfile: 'test.db'
+dbfile: ':memory:'
 # cleandb - true/false whether to start with a fresh database every time the app starts
 cleandb: true
 # template_dir - A directory inside of the root path where templates are stored
@@ -46,7 +46,7 @@ routes:
     # dir - For the static handler, the directory inside of the root path that houses content at this URL
     dir: static
   02_posts:
-    path: /posts/{slug}
+    path: /posts/{slug:.+}
     template: post.html.hb
     layout: layout.html.hb
     handler: posts

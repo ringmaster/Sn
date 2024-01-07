@@ -12,7 +12,7 @@
   </head>
   <body>
     <header>
-        <h1>{{config.title}}</h1>
+        <h1><a href="/">{{config.title}}</a></h1>
         <p>{{config.subtitle}}</p>
         <nav></nav>
     </header>

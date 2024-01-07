@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math"
 	"net/url"
@@ -142,12 +141,13 @@ func DBLoadRepos() {
 func DBLoadRepo(repoName string) {
 	const bufferLen = 5000
 	itempaths := make(chan string, bufferLen)
+	repoPath := ConfigPath(fmt.Sprintf("repos.%s.path", repoName))
 
 	const workers = 1
 	for w := 0; w < workers; w++ {
 		go func(id int, itempaths <-chan string) {
 			for path := range itempaths {
-				item, err := loadItem(repoName, path)
+				item, err := loadItem(repoName, repoPath, path)
 				if err == nil {
 					insertItem(item)
 				} else {
@@ -156,7 +156,6 @@ func DBLoadRepo(repoName string) {
 			}
 		}(w, itempaths)
 	}
-	repoPath := ConfigPath(fmt.Sprintf("repos.%s.path", repoName))
 
 	fmt.Printf("Loading repo %s from %s...", repoName, repoPath)
 	if !DirExists(repoPath) {
@@ -180,7 +179,7 @@ func DBLoadRepo(repoName string) {
 	startWatching(repoPath, repoName)
 }
 
-func reloadItem(repoName string, filename string) (Item, error) {
+func reloadItem(repoName string, repoPath string, filename string) (Item, error) {
 	var item_id int64
 	if err := db.QueryRow("SELECT id FROM items WHERE repo = ? and source = ?", repoName, filename).Scan(&item_id); err == nil && item_id > 0 {
 		fmt.Printf("Deleted item id %d for %s source file %s\n", item_id, repoName, filename)
@@ -192,19 +191,19 @@ func reloadItem(repoName string, filename string) (Item, error) {
 		fmt.Printf("No existing file in repo %s source file %s\n", repoName, filename)
 	}
 
-	item, err := loadItem(repoName, filename)
+	item, err := loadItem(repoName, repoPath, filename)
 	if err == nil {
 		insertItem(item)
 	}
 	return item, err
 }
 
-func loadItem(repoName string, filename string) (Item, error) {
+func loadItem(repoName string, repoPath string, filename string) (Item, error) {
 	var item Item
 
 	item.Source = filename
 
-	file, err := ioutil.ReadFile(filename)
+	file, err := os.ReadFile(filename)
 	if err != nil {
 		panic(err)
 	}
@@ -243,7 +242,11 @@ func loadItem(repoName string, filename string) (Item, error) {
 	if val, ok := f["slug"]; ok {
 		item.Slug = fmt.Sprintf("%v", val)
 	} else {
+		// chop off the repo directory and keep any extra paths with the filename
 		item.Slug = path.Base(filename)
+	}
+	if len(repoPath) < len(path.Dir(filename)) {
+		item.Slug = path.Join(path.Dir(filename)[len(repoPath)+1:], item.Slug)
 	}
 	item.Raw = string(file[:])
 	item.Repo = repoName
@@ -423,7 +426,7 @@ func startWatching(path string, repoName string) {
 			select {
 			case event := <-w.Event:
 				fmt.Println(event) // Print the event's info.
-				reloadItem(repoName, event.Path)
+				reloadItem(repoName, path, event.Path)
 			case err := <-w.Error:
 				log.Fatalln(err)
 			case <-w.Closed:

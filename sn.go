@@ -8,6 +8,7 @@ func main() {
 	sn.ConfigSetup()
 
 	sn.RegisterTemplateHelpers()
+	sn.RegisterPartials()
 
 	sn.DBConnect()
 	defer sn.DBClose()

@@ -15,7 +15,7 @@
     <main>
         <div class="content">
         {{#more html 2}}
-        <div><a href="/{{slug}}">Read More...</a></div>
+        <div><a href="/posts/{{slug}}">Read More...</a></div>
         {{/more}}
         </div>
     </main>

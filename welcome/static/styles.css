@@ -12,3 +12,7 @@ body>header>h1 {
   background-image: url(/static/favicon.svg);
   text-indent: -3000px;
 }
+
+body>header>h1>a {
+  display: block;
+}

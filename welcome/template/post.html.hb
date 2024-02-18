@@ -3,7 +3,7 @@
 <article>
     <header>
         <h2 class="title"><a href="/posts/{{slug}}">{{title}}</a></h2>
-        <p>{{dateformat date "January 02, 2006"}}</p>
+        <p>{{dateformat date "January 02, 2006 03:04:05 PM"}}</p>
         {{#if categories}}
         <div class="tags">
         {{#each categories}}

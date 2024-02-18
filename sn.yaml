@@ -1,3 +1,7 @@
+# TO SPECIFY A DIFFERENT CONFIG FILE
+# Execute the Sn command with an environment variable pointing to the file:
+# SN_CONFIG=/my/config.yaml Sn
+#
 # title - The title of the site, usable in templates for output as {title}
 title: Sn
 # subtitle - The subtitle of the site, usable in templates for output as {subtitle}
@@ -19,7 +23,6 @@ repos:
   posts:
     # path - The directory inside of the root path that will be scanned for files for this repo
     path: posts
-    # path: /Users/ringmaster/Projects/asy/posts
 # routes - A list of URL routes for this site, requests are checked against the paths in alphabetical order by name, first matched wins
 routes:
   01_index:

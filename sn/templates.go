@@ -97,7 +97,14 @@ func RegisterTemplateHelpers() {
 
 		return more + options.Fn()
 	})
-	raymond.RegisterHelper("paginate", func(context interface{}, paragraphs int, options *raymond.Options) string {
-		return options.FnWith(context)
+	raymond.RegisterHelper("paginate", func(pagelist ItemResult, distance int, options *raymond.Options) raymond.SafeString {
+		paginator := ""
+		min := MinOf(pagelist.Page-distance, 1)
+		max := MaxOf(pagelist.Page+distance, pagelist.Pages)
+		for pg := min; pg <= max; pg++ {
+			ctx := map[string]interface{}{"page": pg, "active": pg == pagelist.Page}
+			paginator += options.FnWith(ctx)
+		}
+		return raymond.SafeString(paginator)
 	})
 }

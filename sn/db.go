@@ -111,7 +111,14 @@ func schema() string {
 }
 
 func DBConnect() {
+	var dburi string
 	dbfile := ConfigPath("dbfile", WithDefault(":memory:"), OptionallyExist())
+
+	if dbfile == ":memory:" {
+		dburi = "file:sn?mode=memory&cache=shared"
+	} else {
+		dburi = fmt.Sprintf("file:%s", dbfile)
+	}
 
 	if viper.IsSet("cleandb") && viper.GetBool("cleandb") {
 		fmt.Printf("DELETING database file %s\n", dbfile)
@@ -119,7 +126,8 @@ func DBConnect() {
 	}
 
 	var err error
-	db, err = sql.Open("sqlite", dbfile)
+	fmt.Printf("Oening database %s\n", dburi)
+	db, err = sql.Open("sqlite", dburi)
 
 	if err != nil {
 		log.Fatal(err)
@@ -465,6 +473,10 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 		pg, _ = strconv.Atoi(page)
 	}
 	front := (pg - 1) * perPage
+	for param, param_value := range context["params"].(url.Values) {
+		pathvars[fmt.Sprintf("params.%s", param)] = param_value[0]
+	}
+	fmt.Printf("  Pathvars: %#v\n", pathvars)
 
 	var sql string = `FROM items
 	LEFT JOIN items_authors ON items.id = items_authors.item_id
@@ -480,6 +492,10 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 	sql, queryvals = andSQL(outvals, "repo", pathvars, sql, queryvals)
 	sql, queryvals = andSQL(outvals, "category", pathvars, sql, queryvals)
 	sql, queryvals = andSQL(outvals, "author", pathvars, sql, queryvals)
+	if slug, ok := outvals["search"].(string); ok {
+		queryvals = append(queryvals, fmt.Sprintf("%%%s%%", replaceParams(slug, pathvars)))
+		sql = fmt.Sprintf("%s AND raw LIKE ?", sql)
+	}
 
 	var orderby string = "ORDER BY publishedon DESC"
 	fmt.Printf("    Order by: %s\n", orderby)

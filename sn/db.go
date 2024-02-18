@@ -112,6 +112,7 @@ func schema() string {
 
 func DBConnect() {
 	var dburi string
+	fmt.Println("Connecting to database:")
 	dbfile := ConfigPath("dbfile", WithDefault(":memory:"), OptionallyExist())
 
 	if dbfile == ":memory:" {
@@ -121,12 +122,12 @@ func DBConnect() {
 	}
 
 	if viper.IsSet("cleandb") && viper.GetBool("cleandb") {
-		fmt.Printf("DELETING database file %s\n", dbfile)
+		fmt.Printf("  Deleting database file %s\n", dbfile)
 		os.Remove(dbfile)
 	}
 
 	var err error
-	fmt.Printf("Oening database %s\n", dburi)
+	fmt.Printf("  Opening database %s\n", dburi)
 	db, err = sql.Open("sqlite", dburi)
 
 	if err != nil {
@@ -148,6 +149,7 @@ func DBLoadRepos() {
 
 func DBLoadRepo(repoName string) {
 	const bufferLen = 5000
+	fmt.Println("Loading DB from repo:")
 	itempaths := make(chan string, bufferLen)
 	repoPath := ConfigPath(fmt.Sprintf("repos.%s.path", repoName))
 
@@ -165,7 +167,7 @@ func DBLoadRepo(repoName string) {
 		}(w, itempaths)
 	}
 
-	fmt.Printf("Loading repo %s from %s...", repoName, repoPath)
+	fmt.Printf("  Loading repo %s from %s\n", repoName, repoPath)
 	if !DirExists(repoPath) {
 		panic(fmt.Sprintf("Repo path %s does not exist", repoPath))
 	}
@@ -243,7 +245,7 @@ func loadItem(repoName string, repoPath string, filename string) (Item, error) {
 
 	//fmt.Println(filename)
 	if len(file) < 3 {
-		return item, fmt.Errorf("the file %s is too short to have frontmatter", filename)
+		return item, fmt.Errorf("    -- %s is too short to have frontmatter", filename)
 	}
 
 	item.Title = f["title"].(string)
@@ -422,7 +424,7 @@ func insertFrontmatter(item Item) {
 }
 
 func startWatching(path string, repoName string) {
-	fmt.Printf("Starting recursive watch of %s repo: %s\n", repoName, path)
+	fmt.Printf("  Starting recursive watch of %s repo: %s\n", repoName, path)
 	w := watcher.New()
 	w.SetMaxEvents(1)
 	w.FilterOps(watcher.Create, watcher.Write)

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -210,6 +212,19 @@ func catchallHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(output))
 }
 
+func customFileServer(fs http.FileSystem) http.Handler {
+	fileServer := http.FileServer(fs)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := fs.Open(path.Clean(r.URL.Path)) // Do not allow path traversals.
+		if os.IsNotExist(err) {
+			fmt.Fprintf(w, "404: Cannot find %#v", path.Clean(r.URL.Path))
+
+			return
+		}
+		fileServer.ServeHTTP(w, r)
+	})
+}
+
 func setupRoutes(router *mux.Router) {
 	routelist := make([]string, 0, len(viper.GetStringMap("routes")))
 	for key := range viper.GetStringMap("routes") {
@@ -230,7 +245,10 @@ func setupRoutes(router *mux.Router) {
 				})
 			} else {
 				dir := ConfigPath(fmt.Sprintf("%s.dir", routeConfigLocation))
-				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, http.FileServer(http.Dir(dir))))
+				fmt.Printf("    Static route at %s rooted at %s\n", routePath, dir)
+				//router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, http.FileServer(http.Dir(dir))))
+				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customFileServer(http.Dir(dir))))
+				//router.PathPrefix(routePath).Handler(spaHandler{staticPath: http.Dir(dir), indexPath: "index.html"})
 			}
 		case "git":
 			router.HandleFunc(routePath, gitHandler).Name(routeName)

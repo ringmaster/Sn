@@ -38,15 +38,15 @@ func RegisterPartials() {
 		panic(err)
 	}
 
+	fmt.Println("Registering partial templates:")
 	for _, file := range files {
-		fmt.Println(file.Name(), file.IsDir())
 		if !file.IsDir() {
 			template, err := ioutil.ReadFile(path.Join(templatepath, file.Name()))
 			if err != nil {
 				panic(err)
 			}
 			partialname := regexp.MustCompile(`\.`).Split(file.Name(), 2)[0]
-			fmt.Printf("Partial %s built from %s\n", partialname, file.Name())
+			fmt.Printf("  '%s' built from %s\n", partialname, file.Name())
 			raymond.RegisterPartial(partialname, string(template))
 		}
 	}

@@ -94,7 +94,7 @@ func ConfigPath(shortpath string, opts ...ConfigPathOptionFn) string {
 	buf := bytes.Buffer{}
 	pathTemplate.Execute(&buf, configVars)
 	var renderedPathTemplate string = buf.String()
-	fmt.Printf("Rendered path template: %#q\n", renderedPathTemplate)
+	//fmt.Printf("  Rendered path template: %#q\n", renderedPathTemplate)
 
 	if renderedPathTemplate[0] == '/' && DirExists(renderedPathTemplate) {
 		return renderedPathTemplate
@@ -105,7 +105,7 @@ func ConfigPath(shortpath string, opts ...ConfigPathOptionFn) string {
 		panic(fmt.Sprintf("Configpath for %s does not have absolute path at %s", renderedPathTemplate, viper.GetString("path")))
 	}
 
-	fmt.Printf("configPath: %s %s\n", base, renderedPathTemplate)
+	//fmt.Printf("    configPath: %s %s\n", base, renderedPathTemplate)
 	base = path.Join(base, renderedPathTemplate)
 	if options.MustExist && !DirExists(base) {
 		panic(fmt.Sprintf("Configpath for %s does not exist at %s", renderedPathTemplate, base))

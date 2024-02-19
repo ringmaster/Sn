@@ -2,7 +2,6 @@ package sn
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"regexp"
@@ -23,7 +22,7 @@ func GetTemplateFileFromConfig(configPath string, alternative string) string {
 }
 
 func RenderTemplateFile(filename string, context map[string]interface{}) (string, error) {
-	file, err := ioutil.ReadFile(filename)
+	file, err := os.ReadFile(filename)
 	if err != nil {
 		return string(file), err
 	}
@@ -41,7 +40,7 @@ func RegisterPartials() {
 	fmt.Println("Registering partial templates:")
 	for _, file := range files {
 		if !file.IsDir() {
-			template, err := ioutil.ReadFile(path.Join(templatepath, file.Name()))
+			template, err := os.ReadFile(path.Join(templatepath, file.Name()))
 			if err != nil {
 				panic(err)
 			}
@@ -61,9 +60,10 @@ func RegisterTemplateHelpers() {
 		return result
 	})
 	raymond.RegisterHelper("string", func(str any) string {
-		fmt.Printf("%#v", str)
-		fmt.Printf("(string) %s\n", str)
 		return fmt.Sprintf("<pre>%s</pre>", str)
+	})
+	raymond.RegisterHelper("debug", func(str any, options *raymond.Options) string {
+		return fmt.Sprintf(`<pre style="">%#v</pre>`, str)
 	})
 	raymond.RegisterHelper("dateformat", func(t time.Time, format string) string {
 		return t.Format(format)

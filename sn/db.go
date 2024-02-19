@@ -562,9 +562,22 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 			//fmt.Printf("Authors for post %d:\n", item.Id)
 			var author string
 			for authors.Next() {
-				categories.Scan(&author)
+				authors.Scan(&author)
 				item.Authors = append(item.Authors, author)
 				//fmt.Printf("  %s", author)
+			}
+
+			frontmatters, err := db.Query("SELECT fieldname, value FROM frontmatter WHERE item_id = ?", item.Id)
+
+			if err != nil {
+				panic(err)
+			}
+
+			var fm_key, fm_value string
+			item.Frontmatter = make(map[string]string)
+			for frontmatters.Next() {
+				frontmatters.Scan(&fm_key, &fm_value)
+				item.Frontmatter[fm_key] = fm_value
 			}
 
 			items = append(items, item)

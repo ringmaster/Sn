@@ -465,13 +465,21 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 
 	items = make([]Item, 0)
 
+	var ok bool
 	pathvars := context["pathvars"].(map[string]string)
-	perPage := 5
+	var perPage int
+	if perPage, ok = outvals["paginate_count"].(int); !ok {
+		perPage = 5
+	}
+	var paginate_name string
+	if paginate_name, ok = outvals["paginate_name"].(string); !ok {
+		paginate_name = "page"
+	}
 	pg = 1
-	if page, ok := context["params"].(url.Values)["page"]; ok {
+	if page, ok := context["params"].(url.Values)[paginate_name]; ok {
 		pg, _ = strconv.Atoi(page[0])
 	}
-	if page, ok := pathvars["page"]; ok {
+	if page, ok := pathvars[paginate_name]; ok {
 		pg, _ = strconv.Atoi(page)
 	}
 	front := (pg - 1) * perPage
@@ -485,7 +493,6 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
    LEFT JOIN authors ON authors.id = items_authors.author_id
 	LEFT JOIN items_categories ON items.id = items_categories.item_id
    LEFT JOIN categories ON categories.id = items_categories.category_id WHERE 1`
-	var ok = false
 	var queryvals []any
 
 	fmt.Printf("  Outvals: %#v\n", outvals)
@@ -501,7 +508,7 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 
 	var orderby string = "ORDER BY publishedon DESC"
 	fmt.Printf("    Order by: %s\n", orderby)
-	orderbyval, ok := outvals["orderby"].(string)
+	orderbyval, ok := outvals["order_by"].(string)
 	if ok {
 		orderby = fmt.Sprintf("ORDER BY %s", orderbyval)
 	}

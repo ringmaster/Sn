@@ -13,6 +13,9 @@
         {{/if}}
     </header>
     <main>
+        {{#if frontmatter.hero}}
+        <img src="{{frontmatter.hero}}">
+        {{/if}}
         <div class="content">
         {{{html}}}
         </div>

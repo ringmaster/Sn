@@ -1,3 +1,4 @@
+{{#define "content"}}
 {{#each posts.Items}}
 {{#with this}}
 <article>
@@ -29,3 +30,4 @@
 <li><a href="?page={{page}}">{{page}}</a></li>
 {{/paginate}}
 </ul>
+{{/define}}

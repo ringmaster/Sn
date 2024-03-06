@@ -18,7 +18,7 @@
     </header>
     <main>
         <section id="posts">
-            {{{content}}}
+          {{block "content"}}
         </section>
     </section>
     <footer>

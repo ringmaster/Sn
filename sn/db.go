@@ -227,8 +227,12 @@ func loadItem(repoName string, repoPath string, filename string) (Item, error) {
 			),
 			emoji.Emoji,
 			highlighting.Highlighting,
+			extension.Typographer,
 		),
 		goldmark.WithParserOptions(
+			parser.WithBlockParsers(),
+			parser.WithInlineParsers(),
+			parser.WithParagraphTransformers(),
 			parser.WithAutoHeadingID(),
 			parser.WithAttribute(),
 		),
@@ -248,12 +252,19 @@ func loadItem(repoName string, repoPath string, filename string) (Item, error) {
 		return item, fmt.Errorf("    -- %s is too short to have frontmatter", filename)
 	}
 
-	item.Title = f["title"].(string)
+	if val, ok := f["title"]; ok {
+		item.Title = fmt.Sprintf("%v", val)
+	} else {
+		item.Title = path.Base(filename)
+	}
 	if val, ok := f["slug"]; ok {
+		item.Slug = fmt.Sprintf("%v", val)
+	} else if val, ok := f["permalink"]; ok {
 		item.Slug = fmt.Sprintf("%v", val)
 	} else {
 		// chop off the repo directory and keep any extra paths with the filename
-		item.Slug = path.Base(filename)
+		tfilename := path.Base(filename)
+		item.Slug = tfilename[:len(tfilename)-len(filepath.Ext(tfilename))]
 	}
 	if len(repoPath) < len(path.Dir(filename)) {
 		item.Slug = path.Join(path.Dir(filename)[len(repoPath)+1:], item.Slug)

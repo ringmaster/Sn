@@ -75,6 +75,7 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 func debugHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("Rendering debug handler\n")
 
+	setRootUrl(r)
 	routeName := mux.CurrentRoute(r).GetName()
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
 
@@ -124,6 +125,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("  Rendering templates from %s: %#v\n", templateConfigLocation, templateFiles)
 
 	context := viper.GetStringMap(routeConfigLocation)
+	setRootUrl(r)
 	context["config"] = CopyMap(viper.AllSettings())
 	context["pathvars"] = mux.Vars(r)
 	context["params"] = r.URL.Query()
@@ -174,6 +176,7 @@ func catchallHandler(w http.ResponseWriter, r *http.Request) {
 	templateFiles := GetTemplateFilesFromConfig(templateConfigLocation)
 	fmt.Printf("  Rendering templates from %s: %#v\n", templateConfigLocation, templateFiles)
 
+	setRootUrl(r)
 	context := CopyMap(viper.GetStringMap(routeConfigLocation))
 	context["config"] = CopyMap(viper.AllSettings())
 	context["pathvars"] = mux.Vars(r)
@@ -212,6 +215,14 @@ func customFileServer(fs http.FileSystem) http.Handler {
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+func setRootUrl(r *http.Request) {
+	protocol := "http"
+	if r.TLS != nil {
+		protocol = "https"
+	}
+	viper.SetDefault("rooturl", fmt.Sprintf("%s://%s/", protocol, r.Host))
 }
 
 func setupRoutes(router *mux.Router) {

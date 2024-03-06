@@ -17,7 +17,7 @@ func GetTemplateFilesFromConfig(configPath string) []string {
 	var templates []string
 	templateList := viper.GetStringSlice(configPath)
 	for _, template := range templateList {
-		templates = append(templates, path.Join(viper.GetString("path"), viper.GetString("template_dir"), template))
+		templates = append(templates, path.Join(ConfigPath("template_dir", MustExist()), template))
 	}
 	return templates
 }
@@ -40,7 +40,8 @@ func RenderTemplateFiles(filenames []string, context map[string]interface{}) (st
 }
 
 func RegisterPartials() {
-	templatepath := path.Join(viper.GetString("path"), viper.GetString("template_dir"))
+	templatepath := ConfigPath("template_dir", MustExist())
+	fmt.Printf("Registering partials from %s\n", templatepath)
 	files, err := os.ReadDir(templatepath)
 	if err != nil {
 		panic(err)

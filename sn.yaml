@@ -29,12 +29,12 @@ routes:
   01_index:
     # path - The URL pattern to match against the request, capture URL parts with {braces}
     path: /
-    # template - The template to use to render the content of this page
-    template: posts.html.hb
-    # layout - The template file to use to wrap content rendered with the template
-    layout: layout.html.hb
     # handler - The handler used to process the data to supply to the templates, options: posts, static, debug, git
     handler: posts
+    # template - The templates to use to render the content of this page, rendered in order
+    templates: 
+      - posts.html.hb
+      - layout.html.hb
     # out - A list of named queries that supply data to the template, each name becomes a value that can be used in the template
     out:
       posts:
@@ -51,9 +51,10 @@ routes:
     dir: static
   02_posts:
     path: /posts/{slug:.+}
-    template: post.html.hb
-    layout: layout.html.hb
     handler: posts
+    templates: 
+      - post.html.hb
+      - layout.html.hb
     out:
       posts:
         repo: posts
@@ -64,9 +65,10 @@ routes:
     file: static/favicon.svg
   03_categories:
     path: /tag/{category}
-    template: posts.html.hb
-    layout: layout.html.hb
     handler: posts
+    templates: 
+      - posts.html.hb
+      - layout.html.hb
     out:
       posts:
         repo: posts

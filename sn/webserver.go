@@ -119,9 +119,10 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
 	fmt.Printf("  Config location: %s\n", routeConfigLocation)
 
-	layoutfilename := GetTemplateFileFromConfig(fmt.Sprintf("%s.layout", routeConfigLocation), "layout.html.hb")
-	templatefilename := GetTemplateFileFromConfig(fmt.Sprintf("%s.template", routeConfigLocation), "template.html.hb")
-	fmt.Printf("  Rendering template: %s\n", templatefilename)
+	templateConfigLocation := fmt.Sprintf("%s.templates", routeConfigLocation)
+	templateFiles := GetTemplateFilesFromConfig(templateConfigLocation)
+	fmt.Printf("  Rendering templates from %s: %#v\n", templateConfigLocation, templateFiles)
+
 	context := viper.GetStringMap(routeConfigLocation)
 	context["config"] = CopyMap(viper.AllSettings())
 	context["pathvars"] = mux.Vars(r)
@@ -146,21 +147,12 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		context["mime"] = viper.GetString(fmt.Sprintf("%s.content-type", routeConfigLocation))
 	}
 
-	rendered, err := RenderTemplateFile(templatefilename, context)
+	rendered, err := RenderTemplateFiles(templateFiles, context)
 	if err != nil {
 		fmt.Printf("  Error rendering template: %s\n", err)
-		context["content"] = fmt.Sprintf("<div class=\"notification is-danger\">Error rendering template: %s</div>\n", err)
-	} else {
-		context["content"] = rendered
+		rendered = fmt.Sprintf("<div class=\"notification is-danger\">Error rendering template: %s</div>\n", err)
 	}
-	fmt.Printf("  Rendering layout: %s\n", layoutfilename)
 
-	layoutRendered, err := RenderTemplateFile(layoutfilename, context)
-	if err != nil {
-		fmt.Printf("  Error rendering layout: %s\n", err)
-		context["content"] = fmt.Sprintf("<div class=\"notification is-danger\">Error rendering layout: %s</div>\n", err)
-		layoutRendered = "<html>" + context["content"].(string) + "</html>"
-	}
 	// May use context here to set additional headers, as defined by the handler
 	w.Header().Add("Content-Type", context["mime"].(string))
 	w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -170,27 +162,24 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
 	w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
 
-	w.Write([]byte(layoutRendered))
+	w.Write([]byte(rendered))
 }
 
 func catchallHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("Rendering default handler\n")
 	routeName := mux.CurrentRoute(r).GetName()
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
-	layoutfilename := GetTemplateFileFromConfig(fmt.Sprintf("%s.layout", routeConfigLocation), "layout.html.hb")
-	templatefilename := GetTemplateFileFromConfig(fmt.Sprintf("%s.template", routeConfigLocation), "template.html.hb")
 
-	fmt.Printf("Rendering template: %s\n", templatefilename)
+	templateConfigLocation := fmt.Sprintf("%s.templates", routeConfigLocation)
+	templateFiles := GetTemplateFilesFromConfig(templateConfigLocation)
+	fmt.Printf("  Rendering templates from %s: %#v\n", templateConfigLocation, templateFiles)
+
 	context := CopyMap(viper.GetStringMap(routeConfigLocation))
 	context["config"] = CopyMap(viper.AllSettings())
 	context["pathvars"] = mux.Vars(r)
 	context["params"] = r.URL.Query()
 	context["post"] = nil
-	content, _ := RenderTemplateFile(templatefilename, context)
-	context["content"] = content
-
-	fmt.Printf("Rendering layout: %s\n", layoutfilename)
-	output, _ := RenderTemplateFile(layoutfilename, context)
+	output, _ := RenderTemplateFiles(templateFiles, context)
 
 	if viper.IsSet(fmt.Sprintf("%s.status", routeConfigLocation)) {
 		fmt.Printf("Setting custom status: %d\n", viper.GetInt(fmt.Sprintf("%s.status", routeConfigLocation)))

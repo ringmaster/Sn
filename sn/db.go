@@ -526,20 +526,17 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 		//fmt.Printf("    ITEM SEARCH: \"%s\"\n", sql)
 
 		rows, err := db.Query(sql, queryvals...)
-		if err != nil {
-			panic(err)
-		}
-		defer rows.Close()
 
 		if err != nil {
 			fmt.Printf("Error: %#v", err)
+			return ItemResult{Items: []Item{}, Total: 0, Pages: 0, Page: 0}
 		}
+		defer rows.Close()
 
 		for rows.Next() {
 			var item Item
-			var source string
 			var interimDate string
-			err = rows.Scan(&item.Id, &item.Repo, &item.Title, &item.Slug, &interimDate, &item.RawDate, &item.RawDate, &item.Html, &source)
+			err = rows.Scan(&item.Id, &item.Repo, &item.Title, &item.Slug, &interimDate, &item.RawDate, &item.Raw, &item.Html, &item.Source)
 
 			item.Date, _ = dateparse.ParseLocal(interimDate)
 			if err != nil {

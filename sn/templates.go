@@ -41,13 +41,11 @@ func RenderTemplateFiles(filenames []string, context map[string]interface{}) (st
 
 func RegisterPartials() {
 	templatepath := ConfigPath("template_dir", MustExist())
-	fmt.Printf("Registering partials from %s\n", templatepath)
 	files, err := os.ReadDir(templatepath)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("Registering partial templates:")
 	for _, file := range files {
 		if !file.IsDir() {
 			template, err := os.ReadFile(path.Join(templatepath, file.Name()))
@@ -55,7 +53,6 @@ func RegisterPartials() {
 				panic(err)
 			}
 			partialname := regexp.MustCompile(`\.`).Split(file.Name(), 2)[0]
-			fmt.Printf("  '%s' built from %s\n", partialname, file.Name())
 			raymond.RegisterPartial(partialname, string(template))
 		}
 	}
@@ -74,7 +71,6 @@ func RegisterTemplateHelpers() {
 		return fmt.Sprintf("<pre>%s</pre>", str)
 	})
 	raymond.RegisterHelper("debug", func(str any, options *raymond.Options) string {
-		fmt.Printf("%#v", options.DataFrame())
 		return fmt.Sprintf(`<pre style="">%#v</pre>`, str)
 	})
 	raymond.RegisterHelper("dateformat", func(t time.Time, format string) string {

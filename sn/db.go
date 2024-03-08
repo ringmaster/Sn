@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"log/slog"
 	"math"
 	"net/url"
 	"os"
@@ -112,7 +113,6 @@ func schema() string {
 
 func DBConnect() {
 	var dburi string
-	fmt.Println("Connecting to database:")
 	dbfile := ConfigPath("dbfile", WithDefault(":memory:"), OptionallyExist())
 
 	if dbfile == ":memory:" {
@@ -122,12 +122,10 @@ func DBConnect() {
 	}
 
 	if viper.IsSet("cleandb") && viper.GetBool("cleandb") {
-		fmt.Printf("  Deleting database file %s\n", dbfile)
 		os.Remove(dbfile)
 	}
 
 	var err error
-	fmt.Printf("  Opening database %s\n", dburi)
 	db, err = sql.Open("sqlite", dburi)
 
 	if err != nil {
@@ -149,7 +147,6 @@ func DBLoadRepos() {
 
 func DBLoadRepo(repoName string) {
 	const bufferLen = 5000
-	fmt.Println("Loading DB from repo:")
 	itempaths := make(chan string, bufferLen)
 	repoPath := ConfigPath(fmt.Sprintf("repos.%s.path", repoName))
 
@@ -161,13 +158,12 @@ func DBLoadRepo(repoName string) {
 				if err == nil {
 					insertItem(item)
 				} else {
-					fmt.Println(err)
+					slog.Error(fmt.Sprintln(err))
 				}
 			}
 		}(w, itempaths)
 	}
 
-	fmt.Printf("  Loading repo %s from %s\n", repoName, repoPath)
 	if !DirExists(repoPath) {
 		panic(fmt.Sprintf("Repo path %s does not exist", repoPath))
 	}
@@ -192,13 +188,12 @@ func DBLoadRepo(repoName string) {
 func reloadItem(repoName string, repoPath string, filename string) (Item, error) {
 	var item_id int64
 	if err := db.QueryRow("SELECT id FROM items WHERE repo = ? and source = ?", repoName, filename).Scan(&item_id); err == nil && item_id > 0 {
-		fmt.Printf("Deleted item id %d for %s source file %s\n", item_id, repoName, filename)
 		db.Exec("DELETE FROM items_tags WHERE item_id = ?", item_id)
 		db.Exec("DELETE FROM items_authors WHERE item_id = ?", item_id)
 		db.Exec("DELETE FROM frontmatter WHERE item_id = ?", item_id)
 		db.Exec("DELETE FROM items WHERE repo = ? and source = ?", repoName, filename)
 	} else {
-		fmt.Printf("No existing file in repo %s source file %s\n", repoName, filename)
+		slog.Warn(fmt.Sprintf("No existing file in repo %s source file %s\n", repoName, filename))
 	}
 
 	item, err := loadItem(repoName, repoPath, filename)
@@ -247,7 +242,6 @@ func loadItem(repoName string, repoPath string, filename string) (Item, error) {
 	}
 	f := meta.Get(context)
 
-	//fmt.Println(filename)
 	if len(file) < 3 {
 		return item, fmt.Errorf("    -- %s is too short to have frontmatter", filename)
 	}
@@ -364,13 +358,10 @@ func insertItem(item Item) (int64, error) {
 	)
 
 	if err != nil {
-		fmt.Printf("Error inserting item \"%s\": %s\n", item.Slug, err)
 		return 0, fmt.Errorf("error inserting item \"%s\": %s", item.Slug, err)
 	}
 
 	item.Id, _ = result.LastInsertId()
-
-	//fmt.Printf("Inserted item \"%s\" at ID %d\n", item.Slug, item.Id)
 
 	insertCategories(item)
 	insertAuthors(item)
@@ -435,7 +426,6 @@ func insertFrontmatter(item Item) {
 }
 
 func startWatching(path string, repoName string) {
-	fmt.Printf("  Starting recursive watch of %s repo: %s\n", repoName, path)
 	w := watcher.New()
 	w.SetMaxEvents(1)
 	w.FilterOps(watcher.Create, watcher.Write)
@@ -446,7 +436,6 @@ func startWatching(path string, repoName string) {
 		for {
 			select {
 			case event := <-w.Event:
-				fmt.Println(event) // Print the event's info.
 				reloadItem(repoName, path, event.Path)
 			case err := <-w.Error:
 				log.Fatalln(err)
@@ -465,8 +454,6 @@ func startWatching(path string, repoName string) {
 			log.Fatalln(err)
 		}
 	}()
-
-	fmt.Printf("Started recursive watch of %s repo\n", repoName)
 }
 
 // @todo refactor this to use specific tuple values instead of the full context?
@@ -497,7 +484,6 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 	for param, param_value := range context["params"].(url.Values) {
 		pathvars[fmt.Sprintf("params.%s", param)] = param_value[0]
 	}
-	fmt.Printf("  Pathvars: %#v\n", pathvars)
 
 	var sql string = `FROM items
 	LEFT JOIN items_authors ON items.id = items_authors.item_id
@@ -505,8 +491,6 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 	LEFT JOIN items_categories ON items.id = items_categories.item_id
    LEFT JOIN categories ON categories.id = items_categories.category_id WHERE 1`
 	var queryvals []any
-
-	fmt.Printf("  Outvals: %#v\n", outvals)
 
 	sql, queryvals = andSQL(outvals, "slug", pathvars, sql, queryvals)
 	sql, queryvals = andSQL(outvals, "repo", pathvars, sql, queryvals)
@@ -518,28 +502,23 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 	}
 
 	var orderby string = "ORDER BY publishedon DESC"
-	fmt.Printf("    Order by: %s\n", orderby)
 	orderbyval, ok := outvals["order_by"].(string)
 	if ok {
 		orderby = fmt.Sprintf("ORDER BY %s", orderbyval)
 	}
-	fmt.Printf("    Order by reset: %s\n", orderby)
 
 	countsql := fmt.Sprintf("SELECT count(distinct items.id) %s", sql)
 
 	var itemCount int
-	fmt.Printf("    ITEM COUNT: \"%s\"\n", countsql)
 	db.QueryRow(countsql, queryvals...).Scan(&itemCount)
 
 	if itemCount > 0 {
 		sql = fmt.Sprintf("SELECT distinct items.id, repo, title, slug, publishedon, rawpublishedon, raw, html, source %s %s LIMIT %d, %d", sql, orderby, front, perPage)
 
-		//fmt.Printf("    ITEM SEARCH: \"%s\"\n", sql)
-
 		rows, err := db.Query(sql, queryvals...)
 
 		if err != nil {
-			fmt.Printf("Error: %#v", err)
+			slog.Error(fmt.Sprintf("Error: %#v", err))
 			return ItemResult{Items: []Item{}, Total: 0, Pages: 0, Page: 0}
 		}
 		defer rows.Close()
@@ -560,12 +539,10 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 				panic(err)
 			}
 
-			//fmt.Printf("Categories for post %d:\n", item.Id)
 			var category string
 			for categories.Next() {
 				categories.Scan(&category)
 				item.Categories = append(item.Categories, category)
-				//fmt.Printf("  %s", category)
 			}
 
 			authors, err := db.Query("SELECT author FROM authors INNER JOIN items_authors ON items_authors.author_id = authors.id WHERE items_authors.item_id = ?", item.Id)
@@ -574,12 +551,10 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 				panic(err)
 			}
 
-			//fmt.Printf("Authors for post %d:\n", item.Id)
 			var author string
 			for authors.Next() {
 				authors.Scan(&author)
 				item.Authors = append(item.Authors, author)
-				//fmt.Printf("  %s", author)
 			}
 
 			frontmatters, err := db.Query("SELECT fieldname, value FROM frontmatter WHERE item_id = ?", item.Id)

@@ -1,15 +1,18 @@
 package sn
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
@@ -23,8 +26,6 @@ import (
 var router *mux.Router
 
 func gitHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("Rendering git handler\n")
-
 	routeName := mux.CurrentRoute(r).GetName()
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
 
@@ -34,32 +35,32 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 	var sshAuth *ssh.PublicKeys
 	sshPath, err := filepath.Abs(ConfigPath(fmt.Sprintf("%s.keyfile", routeConfigLocation)))
 	if err != nil {
-		fmt.Println(err)
+		slog.Error(err.Error())
 	}
 	sshAuth, err = ssh.NewPublicKeysFromFile("git", sshPath, "")
 	if err != nil {
-		fmt.Println(err)
+		slog.Error(err.Error())
 	}
 
 	repo, err := git.PlainOpen(path)
 	if err != nil {
-		fmt.Printf("Git PlainOpen (%s): %#v\n", path, err)
+		slog.Error(fmt.Sprintf("Git PlainOpen (%s): %#v\n", path, err))
 	}
 	worktree, err := repo.Worktree()
 	if err != nil {
-		fmt.Printf("Git Worktree: %#v\n", err)
+		slog.Error(fmt.Sprintf("Git Worktree: %#v\n", err))
 	}
 	err = worktree.Pull(&git.PullOptions{
 		RemoteName: remote,
 		Auth:       sshAuth,
 	})
 	if err != nil {
-		fmt.Printf("Git PullOptions: %#v\n", err)
+		slog.Error(fmt.Sprintf("Git PullOptions: %#v\n", err))
 	}
 
 	ref, _ := repo.Head()
 	commit, _ := repo.CommitObject(ref.Hash())
-	fmt.Printf("Current commit hash on %s: %s\n%s\n", path, ref.Hash(), commit)
+	slog.Info("commit", "commit_text", commit, "commit_hash", ref.Hash(), "commit_path", path)
 
 	w.Header().Add("Content-Type", "text/plain")
 	w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -73,8 +74,6 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func debugHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("Rendering debug handler\n")
-
 	setRootUrl(r)
 	routeName := mux.CurrentRoute(r).GetName()
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
@@ -116,13 +115,10 @@ func debugHandler(w http.ResponseWriter, r *http.Request) {
 
 func postHandler(w http.ResponseWriter, r *http.Request) {
 	routeName := mux.CurrentRoute(r).GetName()
-	fmt.Printf("Rendering posts handler for route %s\n", routeName)
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
-	fmt.Printf("  Config location: %s\n", routeConfigLocation)
 
 	templateConfigLocation := fmt.Sprintf("%s.templates", routeConfigLocation)
 	templateFiles := GetTemplateFilesFromConfig(templateConfigLocation)
-	fmt.Printf("  Rendering templates from %s: %#v\n", templateConfigLocation, templateFiles)
 
 	context := viper.GetStringMap(routeConfigLocation)
 	setRootUrl(r)
@@ -131,12 +127,8 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 	context["params"] = r.URL.Query()
 	context["post"] = nil
 
-	pathvars := context["pathvars"]
-	fmt.Printf("  Pathvars: %+v\n", pathvars)
-
 	// Find the itemquery instances, loop over, assign results to context
 	for outVarName := range viper.GetStringMap(fmt.Sprintf("%s.out", routeConfigLocation)) {
-		fmt.Printf("  Fetching data for %s\n", outVarName)
 		qlocation := fmt.Sprintf("%s.out.%s", routeConfigLocation, outVarName)
 		outvals := viper.GetStringMap(qlocation)
 		itemResult := ItemsFromOutvals(outvals, context)
@@ -151,7 +143,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 
 	rendered, err := RenderTemplateFiles(templateFiles, context)
 	if err != nil {
-		fmt.Printf("  Error rendering template: %s\n", err)
+		slog.Default().Error("error rendering template", "err", err)
 		rendered = fmt.Sprintf("<div class=\"notification is-danger\">Error rendering template: %s</div>\n", err)
 	}
 
@@ -168,13 +160,11 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func catchallHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("Rendering default handler\n")
 	routeName := mux.CurrentRoute(r).GetName()
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
 
 	templateConfigLocation := fmt.Sprintf("%s.templates", routeConfigLocation)
 	templateFiles := GetTemplateFilesFromConfig(templateConfigLocation)
-	fmt.Printf("  Rendering templates from %s: %#v\n", templateConfigLocation, templateFiles)
 
 	setRootUrl(r)
 	context := CopyMap(viper.GetStringMap(routeConfigLocation))
@@ -185,12 +175,10 @@ func catchallHandler(w http.ResponseWriter, r *http.Request) {
 	output, _ := RenderTemplateFiles(templateFiles, context)
 
 	if viper.IsSet(fmt.Sprintf("%s.status", routeConfigLocation)) {
-		fmt.Printf("Setting custom status: %d\n", viper.GetInt(fmt.Sprintf("%s.status", routeConfigLocation)))
 		w.WriteHeader(viper.GetInt(fmt.Sprintf("%s.status", routeConfigLocation)))
 	}
 
 	if viper.IsSet(fmt.Sprintf("%s.content-type", routeConfigLocation)) {
-		fmt.Printf("Setting custom content-type: %s\n", viper.GetString(fmt.Sprintf("%s.content-type", routeConfigLocation)))
 		w.Header().Add("Content-Type", viper.GetString(fmt.Sprintf("%s.content-type", routeConfigLocation)))
 	} else {
 		w.Header().Add("Content-Type", "text/html")
@@ -245,7 +233,6 @@ func setupRoutes(router *mux.Router) {
 				})
 			} else {
 				dir := ConfigPath(fmt.Sprintf("%s.dir", routeConfigLocation))
-				fmt.Printf("    Static route at %s rooted at %s\n", routePath, dir)
 				//router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, http.FileServer(http.Dir(dir))))
 				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customFileServer(http.Dir(dir))))
 				//router.PathPrefix(routePath).Handler(spaHandler{staticPath: http.Dir(dir), indexPath: "index.html"})
@@ -261,8 +248,21 @@ func setupRoutes(router *mux.Router) {
 	}
 }
 
+func LogMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		logger := slog.Default()
+		req := r.WithContext(context.WithValue(r.Context(), "logger", logger))
+
+		next.ServeHTTP(w, req)
+
+		logger.Info("web request", "request_duration", time.Since(start))
+	})
+}
+
 func WebserverStart() {
 	router = mux.NewRouter()
+	router.Use(LogMiddleware)
 	setupRoutes(router)
 	http.Handle("/", etag.Handler(handlers.CompressHandler(router), false))
 
@@ -281,10 +281,11 @@ func WebserverStart() {
 		}
 
 		go http.ListenAndServe(":http", certManager.HTTPHandler(nil))
-		fmt.Printf("Starting TLS HTTPS server on localhost, and HTTP server for LetsEncrypt.\n")
+		slog.Default().Info("TLS HTTPS server started", "domains", viper.GetStringSlice("ssldomains"))
 		log.Fatal(server.ListenAndServeTLS("", ""))
 	} else {
-		fmt.Printf("Starting HTTP server on http://localhost:%d\n", viper.GetInt("port"))
+		slog.Default().Info("HTTP server started", "port", viper.GetInt("port"),
+			"host", fmt.Sprintf("http://localhost:%d", viper.GetInt("port")))
 		log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", viper.GetInt("port")), nil))
 	}
 }

@@ -3,6 +3,7 @@ package sn
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,21 +17,18 @@ func ConfigSetup() {
 	viper.AddConfigPath(".")
 	if snConfigFile := os.Getenv("SN_CONFIG"); snConfigFile != "" {
 		snConfigFile, _ := filepath.Abs(snConfigFile)
-		fmt.Printf("Loading configuration file: %s\n", snConfigFile)
 		viper.SetConfigFile(snConfigFile)
 	}
 
 	viper.WatchConfig()
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			fmt.Println("Could not find configuration file")
+			slog.Error("Could not find configuration file")
 		} else {
-			fmt.Println("Error while loading configuration file")
-			fmt.Printf("%q", err)
+			slog.Error(fmt.Sprintf("Error while loading configuration file %#q", err))
 		}
 	}
 	viper.SetDefault("path", filepath.Dir(viper.ConfigFileUsed()))
-	fmt.Printf("Used configuration file: %s\n", viper.ConfigFileUsed())
 }
 
 func ConfigStringDefault(configLocation string, defaultVal string) string {
@@ -95,7 +93,6 @@ func ConfigPath(shortpath string, opts ...ConfigPathOptionFn) string {
 	buf := bytes.Buffer{}
 	pathTemplate.Execute(&buf, configVars)
 	var renderedPathTemplate string = buf.String()
-	fmt.Printf("  Rendered path template: %#q\n", renderedPathTemplate)
 
 	if path.IsAbs(renderedPathTemplate) && DirExists(renderedPathTemplate) {
 		return renderedPathTemplate
@@ -106,7 +103,6 @@ func ConfigPath(shortpath string, opts ...ConfigPathOptionFn) string {
 		panic(fmt.Sprintf("There is no absolute path at %s", viper.GetString("path")))
 	}
 
-	fmt.Printf("    configPath: %s %s\n", base, renderedPathTemplate)
 	base = path.Join(base, renderedPathTemplate)
 	if options.MustExist && !DirExists(base) {
 		panic(fmt.Sprintf("Configpath for %s does not exist at %s", renderedPathTemplate, base))

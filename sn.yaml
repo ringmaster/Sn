@@ -59,6 +59,7 @@ routes:
       posts:
         repo: posts
         slug: "{slug}"
+        404_on_empty: fof
   02_favicon:
     path: /favicon.ico
     handler: static
@@ -94,3 +95,8 @@ routes:
     handler: git
     remote: asy
     dir: /Users/ringmaster/Projects/Sn
+  fof:
+    templates: 
+      - 404.html.hb
+      - layout.html.hb
+

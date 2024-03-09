@@ -113,6 +113,44 @@ func debugHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(output))
 }
 
+func fofHandler(w http.ResponseWriter, r *http.Request, route string) {
+	routeName := route
+	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
+
+	templateConfigLocation := fmt.Sprintf("%s.templates", routeConfigLocation)
+	templateFiles := GetTemplateFilesFromConfig(templateConfigLocation)
+
+	context := viper.GetStringMap(routeConfigLocation)
+	setRootUrl(r)
+	context["config"] = CopyMap(viper.AllSettings())
+	context["pathvars"] = mux.Vars(r)
+	context["params"] = r.URL.Query()
+	context["post"] = nil
+
+	context["mime"] = "text/html"
+	if viper.IsSet(fmt.Sprintf("%s.content-type", routeConfigLocation)) {
+		context["mime"] = viper.GetString(fmt.Sprintf("%s.content-type", routeConfigLocation))
+	}
+
+	rendered, err := RenderTemplateFiles(templateFiles, context)
+	if err != nil {
+		slog.Default().Error("error rendering template", "err", err)
+		rendered = fmt.Sprintf("<div class=\"notification is-danger\">Error rendering template: %s</div>\n", err)
+	}
+
+	// May use context here to set additional headers, as defined by the handler
+	w.Header().Add("Content-Type", context["mime"].(string))
+	w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	w.Header().Add("X-Frame-Options", "SAMEORIGIN")
+	w.Header().Add("X-Content-Type-Options", "nosniff")
+	w.Header().Add("Upgrade-Insecure-Requests", "1")
+	w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
+	w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
+	w.WriteHeader(404)
+
+	w.Write([]byte(rendered))
+}
+
 func postHandler(w http.ResponseWriter, r *http.Request) {
 	routeName := mux.CurrentRoute(r).GetName()
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
@@ -134,6 +172,10 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 		itemResult := ItemsFromOutvals(outvals, context)
 
 		context[outVarName] = itemResult
+		if len(itemResult.Items) == 0 && outvals["404_on_empty"] != nil {
+			fofHandler(w, r, outvals["404_on_empty"].(string))
+			return
+		}
 	}
 
 	context["mime"] = "text/html"
@@ -256,7 +298,8 @@ func LogMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, req)
 
-		logger.Info("web request", "request_duration", time.Since(start))
+		logger.Info("web request", "request_duration", fmt.Sprintf("%dms", time.Since(start).Milliseconds()),
+			"route", mux.CurrentRoute(r).GetName(), "path", r.URL.Path)
 	})
 }
 

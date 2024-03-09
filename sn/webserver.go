@@ -74,7 +74,6 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func debugHandler(w http.ResponseWriter, r *http.Request) {
-	setRootUrl(r)
 	routeName := mux.CurrentRoute(r).GetName()
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
 
@@ -85,9 +84,10 @@ func debugHandler(w http.ResponseWriter, r *http.Request) {
 	output += "\n"
 
 	router.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
+		output += fmt.Sprintln("ROUTE: ", route.GetName())
 		pathTemplate, err := route.GetPathTemplate()
 		if err == nil {
-			output += fmt.Sprintln("ROUTE: ", pathTemplate)
+			output += fmt.Sprintln("Path: ", pathTemplate)
 		}
 		pathRegexp, err := route.GetPathRegexp()
 		if err == nil {
@@ -113,53 +113,13 @@ func debugHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(output))
 }
 
-func fofHandler(w http.ResponseWriter, r *http.Request, route string) {
-	routeName := route
+func templateHandler(w http.ResponseWriter, r *http.Request, routeName string) {
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
 
 	templateConfigLocation := fmt.Sprintf("%s.templates", routeConfigLocation)
 	templateFiles := GetTemplateFilesFromConfig(templateConfigLocation)
 
 	context := viper.GetStringMap(routeConfigLocation)
-	setRootUrl(r)
-	context["config"] = CopyMap(viper.AllSettings())
-	context["pathvars"] = mux.Vars(r)
-	context["params"] = r.URL.Query()
-	context["post"] = nil
-
-	context["mime"] = "text/html"
-	if viper.IsSet(fmt.Sprintf("%s.content-type", routeConfigLocation)) {
-		context["mime"] = viper.GetString(fmt.Sprintf("%s.content-type", routeConfigLocation))
-	}
-
-	rendered, err := RenderTemplateFiles(templateFiles, context)
-	if err != nil {
-		slog.Default().Error("error rendering template", "err", err)
-		rendered = fmt.Sprintf("<div class=\"notification is-danger\">Error rendering template: %s</div>\n", err)
-	}
-
-	// May use context here to set additional headers, as defined by the handler
-	w.Header().Add("Content-Type", context["mime"].(string))
-	w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-	w.Header().Add("X-Frame-Options", "SAMEORIGIN")
-	w.Header().Add("X-Content-Type-Options", "nosniff")
-	w.Header().Add("Upgrade-Insecure-Requests", "1")
-	w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
-	w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
-	w.WriteHeader(404)
-
-	w.Write([]byte(rendered))
-}
-
-func postHandler(w http.ResponseWriter, r *http.Request) {
-	routeName := mux.CurrentRoute(r).GetName()
-	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
-
-	templateConfigLocation := fmt.Sprintf("%s.templates", routeConfigLocation)
-	templateFiles := GetTemplateFilesFromConfig(templateConfigLocation)
-
-	context := viper.GetStringMap(routeConfigLocation)
-	setRootUrl(r)
 	context["config"] = CopyMap(viper.AllSettings())
 	context["pathvars"] = mux.Vars(r)
 	context["params"] = r.URL.Query()
@@ -173,7 +133,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 
 		context[outVarName] = itemResult
 		if len(itemResult.Items) == 0 && outvals["404_on_empty"] != nil {
-			fofHandler(w, r, outvals["404_on_empty"].(string))
+			templateHandler(w, r, outvals["404_on_empty"].(string))
 			return
 		}
 	}
@@ -182,6 +142,7 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 	if viper.IsSet(fmt.Sprintf("%s.content-type", routeConfigLocation)) {
 		context["mime"] = viper.GetString(fmt.Sprintf("%s.content-type", routeConfigLocation))
 	}
+	context["http_status"] = 200
 
 	rendered, err := RenderTemplateFiles(templateFiles, context)
 	if err != nil {
@@ -197,41 +158,26 @@ func postHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Upgrade-Insecure-Requests", "1")
 	w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
 	w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
+	if viper.IsSet(fmt.Sprintf("%s.location", routeConfigLocation)) {
+		context["location"] = viper.GetString(fmt.Sprintf("%s.location", routeConfigLocation))
+		w.Header().Add("location", context["location"].(string))
+		if context["http_status"] == "200" {
+			context["http_status"] = 302
+		}
+	}
+	w.WriteHeader(context["http_status"].(int))
 
 	w.Write([]byte(rendered))
 }
 
+func postHandler(w http.ResponseWriter, r *http.Request) {
+	routeName := mux.CurrentRoute(r).GetName()
+	templateHandler(w, r, routeName)
+}
+
 func catchallHandler(w http.ResponseWriter, r *http.Request) {
 	routeName := mux.CurrentRoute(r).GetName()
-	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
-
-	templateConfigLocation := fmt.Sprintf("%s.templates", routeConfigLocation)
-	templateFiles := GetTemplateFilesFromConfig(templateConfigLocation)
-
-	setRootUrl(r)
-	context := CopyMap(viper.GetStringMap(routeConfigLocation))
-	context["config"] = CopyMap(viper.AllSettings())
-	context["pathvars"] = mux.Vars(r)
-	context["params"] = r.URL.Query()
-	context["post"] = nil
-	output, _ := RenderTemplateFiles(templateFiles, context)
-
-	if viper.IsSet(fmt.Sprintf("%s.status", routeConfigLocation)) {
-		w.WriteHeader(viper.GetInt(fmt.Sprintf("%s.status", routeConfigLocation)))
-	}
-
-	if viper.IsSet(fmt.Sprintf("%s.content-type", routeConfigLocation)) {
-		w.Header().Add("Content-Type", viper.GetString(fmt.Sprintf("%s.content-type", routeConfigLocation)))
-	} else {
-		w.Header().Add("Content-Type", "text/html")
-	}
-	w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-	w.Header().Add("X-Frame-Options", "SAMEORIGIN")
-	w.Header().Add("X-Content-Type-Options", "nosniff")
-	w.Header().Add("Upgrade-Insecure-Requests", "1")
-	w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
-	w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
-	w.Write([]byte(output))
+	templateHandler(w, r, routeName)
 }
 
 func customFileServer(fs http.FileSystem) http.Handler {
@@ -272,11 +218,11 @@ func setupRoutes(router *mux.Router) {
 				file := ConfigPath(fmt.Sprintf("%s.file", routeConfigLocation), OptionallyExist())
 				router.HandleFunc(routePath, func(rw http.ResponseWriter, r *http.Request) {
 					http.ServeFile(rw, r, file)
-				})
+				}).Name(routeName)
 			} else {
 				dir := ConfigPath(fmt.Sprintf("%s.dir", routeConfigLocation))
 				//router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, http.FileServer(http.Dir(dir))))
-				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customFileServer(http.Dir(dir))))
+				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customFileServer(http.Dir(dir)))).Name(routeName)
 				//router.PathPrefix(routePath).Handler(spaHandler{staticPath: http.Dir(dir), indexPath: "index.html"})
 			}
 		case "git":
@@ -285,7 +231,7 @@ func setupRoutes(router *mux.Router) {
 			router.HandleFunc(routePath, debugHandler).Name(routeName)
 		case "redirect":
 		default:
-			router.PathPrefix("/").HandlerFunc(catchallHandler)
+			router.HandleFunc(routePath, catchallHandler).Name(routeName)
 		}
 	}
 }
@@ -294,6 +240,8 @@ func LogMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		logger := slog.Default()
+		setRootUrl(r)
+
 		req := r.WithContext(context.WithValue(r.Context(), "logger", logger))
 
 		next.ServeHTTP(w, req)

@@ -49,22 +49,11 @@ routes:
     path: /static
     # dir - For the static handler, the directory inside of the root path that houses content at this URL
     dir: static
-  02_posts:
-    path: /posts/{slug:.+}
-    handler: posts
-    templates: 
-      - post.html.hb
-      - layout.html.hb
-    out:
-      posts:
-        repo: posts
-        slug: "{slug}"
-        404_on_empty: fof
-  02_favicon:
+  03_favicon:
     path: /favicon.ico
     handler: static
     file: static/favicon.svg
-  03_categories:
+  04_categories:
     path: /tag/{category}
     handler: posts
     templates: 
@@ -76,7 +65,18 @@ routes:
         category: "{category}"
         paginate_name: page
         paginate_count: 5
-  04_search:
+  05_posts:
+    path: /posts/{slug:.+}
+    handler: posts
+    templates: 
+      - post.html.hb
+      - layout.html.hb
+    out:
+      posts:
+        repo: posts
+        slug: "{slug}"
+        404_on_empty: fof
+  06_search:
     path: /search
     template: posts.html.hb
     layout: layout.html.hb
@@ -96,6 +96,8 @@ routes:
     remote: asy
     dir: /Users/ringmaster/Projects/Sn
   fof:
+    path: /{any:.*}
+    handler: posts
     templates: 
       - 404.html.hb
       - layout.html.hb

@@ -145,6 +145,10 @@ func DBLoadRepos() {
 	}
 }
 
+func DBQuery(query string) (*sql.Rows, error) {
+	return db.Query(query)
+}
+
 func DBLoadRepo(repoName string) {
 	const bufferLen = 5000
 	itempaths := make(chan string, bufferLen)
@@ -456,34 +460,67 @@ func startWatching(path string, repoName string) {
 	}()
 }
 
-// @todo refactor this to use specific tuple values instead of the full context?
-func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interface{}) ItemResult {
+type ItemQuery struct {
+	PerPage     int
+	Page        int
+	Slug        *string
+	Repo        *string
+	Category    *string
+	Author      *string
+	Search      *string
+	OrderBy     *string
+	Frontmatter map[string]string
+}
+
+func setQryValue(field **string, params map[string]interface{}, key string) {
+	if values, ok := params[key]; ok {
+		str := values.(string)
+		*field = &str
+	}
+}
+
+func ItemsFromOutvals(outVariableParams map[string]interface{}, context map[string]interface{}) ItemResult {
+	qry := ItemQuery{Page: 1, Frontmatter: make(map[string]string)}
+
+	var ok bool
+	// routeParameters is a map of the parameters that define this route path
+	routeParameters := context["pathvars"].(map[string]string)
+	if qry.PerPage, ok = outVariableParams["paginate_count"].(int); !ok {
+		qry.PerPage = 5
+	}
+	var paginate_name string
+	if paginate_name, ok = outVariableParams["paginate_name"].(string); !ok {
+		paginate_name = "page"
+	}
+	if page, ok := context["params"].(url.Values)[paginate_name]; ok {
+		qry.Page, _ = strconv.Atoi(page[0])
+	}
+	if page, ok := routeParameters[paginate_name]; ok {
+		qry.Page, _ = strconv.Atoi(page)
+	}
+	// Add the query params into the route parameters for replacement in the outVariable params
+	for param, param_value := range context["params"].(url.Values) {
+		routeParameters[fmt.Sprintf("params.%s", param)] = param_value[0]
+	}
+
+	params := replaceParams(outVariableParams, routeParameters)
+	setQryValue(&qry.Slug, params, "slug")
+	setQryValue(&qry.Repo, params, "repo")
+	setQryValue(&qry.Category, params, "category")
+	setQryValue(&qry.Author, params, "author")
+	setQryValue(&qry.Search, params, "search")
+	setQryValue(&qry.OrderBy, params, "order_by")
+
+	return ItemsFromItemQuery(qry)
+}
+
+func ItemsFromItemQuery(qry ItemQuery) ItemResult {
 	var items []Item
 	var pg int
 
 	items = make([]Item, 0)
 
-	var ok bool
-	pathvars := context["pathvars"].(map[string]string)
-	var perPage int
-	if perPage, ok = outvals["paginate_count"].(int); !ok {
-		perPage = 5
-	}
-	var paginate_name string
-	if paginate_name, ok = outvals["paginate_name"].(string); !ok {
-		paginate_name = "page"
-	}
-	pg = 1
-	if page, ok := context["params"].(url.Values)[paginate_name]; ok {
-		pg, _ = strconv.Atoi(page[0])
-	}
-	if page, ok := pathvars[paginate_name]; ok {
-		pg, _ = strconv.Atoi(page)
-	}
-	front := (pg - 1) * perPage
-	for param, param_value := range context["params"].(url.Values) {
-		pathvars[fmt.Sprintf("params.%s", param)] = param_value[0]
-	}
+	front := (qry.Page - 1) * qry.PerPage
 
 	var sql string = `FROM items
 	LEFT JOIN items_authors ON items.id = items_authors.item_id
@@ -492,19 +529,18 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
    LEFT JOIN categories ON categories.id = items_categories.category_id WHERE 1`
 	var queryvals []any
 
-	sql, queryvals = andSQL(outvals, "slug", pathvars, sql, queryvals)
-	sql, queryvals = andSQL(outvals, "repo", pathvars, sql, queryvals)
-	sql, queryvals = andSQL(outvals, "category", pathvars, sql, queryvals)
-	sql, queryvals = andSQL(outvals, "author", pathvars, sql, queryvals)
-	if slug, ok := outvals["search"].(string); ok {
-		queryvals = append(queryvals, fmt.Sprintf("%%%s%%", replaceParams(slug, pathvars)))
+	sql, queryvals = andSQL("slug", qry.Slug, sql, queryvals)
+	sql, queryvals = andSQL("repo", qry.Repo, sql, queryvals)
+	sql, queryvals = andSQL("category", qry.Category, sql, queryvals)
+	sql, queryvals = andSQL("author", qry.Author, sql, queryvals)
+	if qry.Search != nil {
+		queryvals = append(queryvals, fmt.Sprintf("%%%s%%", *qry.Search))
 		sql = fmt.Sprintf("%s AND raw LIKE ?", sql)
 	}
 
 	var orderby string = "ORDER BY publishedon DESC"
-	orderbyval, ok := outvals["order_by"].(string)
-	if ok {
-		orderby = fmt.Sprintf("ORDER BY %s", orderbyval)
+	if qry.OrderBy != nil {
+		orderby = fmt.Sprintf("ORDER BY %s", *qry.OrderBy)
 	}
 
 	countsql := fmt.Sprintf("SELECT count(distinct items.id) %s", sql)
@@ -513,7 +549,7 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 	db.QueryRow(countsql, queryvals...).Scan(&itemCount)
 
 	if itemCount > 0 {
-		sql = fmt.Sprintf("SELECT distinct items.id, repo, title, slug, publishedon, rawpublishedon, raw, html, source %s %s LIMIT %d, %d", sql, orderby, front, perPage)
+		sql = fmt.Sprintf("SELECT distinct items.id, repo, title, slug, publishedon, rawpublishedon, raw, html, source %s %s LIMIT %d, %d", sql, orderby, front, qry.PerPage)
 
 		rows, err := db.Query(sql, queryvals...)
 
@@ -574,20 +610,24 @@ func ItemsFromOutvals(outvals map[string]interface{}, context map[string]interfa
 		}
 	}
 
-	return ItemResult{Items: items, Total: int(itemCount), Pages: int(math.Ceil(float64(itemCount) / float64(perPage))), Page: pg}
+	return ItemResult{Items: items, Total: int(itemCount), Pages: int(math.Ceil(float64(itemCount) / float64(qry.PerPage))), Page: pg}
 }
 
-func replaceParams(temp string, params map[string]string) string {
-	for k, v := range params {
-		temp = strings.ReplaceAll(temp, fmt.Sprintf("{%s}", k), v)
+func replaceParams(values map[string]interface{}, params map[string]string) map[string]interface{} {
+	for k1, v1 := range values {
+		temp := v1
+		for k, v := range params {
+			temp = strings.ReplaceAll(temp.(string), fmt.Sprintf("{%s}", k), v)
+		}
+		values[k1] = temp
 	}
-	return temp
+	return values
 }
 
-func andSQL(outvals map[string]interface{}, outvalname string, pathvars map[string]string, sql string, queryvals []any) (string, []any) {
-	if slug, ok := outvals[outvalname].(string); ok {
-		queryvals = append(queryvals, replaceParams(slug, pathvars))
-		sql = fmt.Sprintf("%s AND %s = ?", sql, outvalname)
+func andSQL(paramName string, qryParam *string, sql string, queryvals []any) (string, []any) {
+	if qryParam != nil {
+		queryvals = append(queryvals, qryParam)
+		sql = fmt.Sprintf("%s AND %s = ?", sql, paramName)
 	}
 	return sql, queryvals
 }

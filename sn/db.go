@@ -149,6 +149,74 @@ func DBQuery(query string) (*sql.Rows, error) {
 	return db.Query(query)
 }
 
+func DBLoadReposSync() {
+	for repoName := range viper.GetStringMap("repos") {
+		repoPath := ConfigPath(fmt.Sprintf("repos.%s.path", repoName))
+
+		if !DirExists(repoPath) {
+			panic(fmt.Sprintf("Repo path %s does not exist", repoPath))
+		}
+
+		errz := filepath.Walk(repoPath, func(path string, info os.FileInfo, err error) error {
+			if info.IsDir() {
+				return nil
+			}
+			if filepath.Ext(path) != ".md" {
+				return nil
+			}
+			item, err := loadItem(repoName, repoPath, path)
+			if err == nil {
+				insertItem(item)
+			} else {
+				slog.Error(fmt.Sprintln(err))
+			}
+			return nil
+		})
+		if errz != nil {
+			panic(errz)
+		}
+	}
+}
+
+func RowToMapSlice(rows *sql.Rows) ([][]string, error) {
+	// Slice to hold the maps
+	var maps [][]string
+
+	// Get column names from the rows
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	// Prepare a slice of interfaces to hold the values for each column
+	for rows.Next() {
+		// Create a slice of interface{}'s to represent each column,
+		// and a slice of string to hold the values (as all values will be converted to strings)
+		values := make([]interface{}, len(cols))
+		stringValues := make([]string, len(cols))
+		for i := range values {
+			// Point each interface{} to the corresponding string in the stringValues slice
+			values[i] = &stringValues[i]
+		}
+
+		// Scan the row values into the interfaces
+		err := rows.Scan(values...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Append the map to the slice
+		maps = append(maps, stringValues)
+	}
+
+	// Check for errors from iterating over rows
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %w", err)
+	}
+
+	return maps, nil
+}
+
 func DBLoadRepo(repoName string) {
 	const bufferLen = 5000
 	itempaths := make(chan string, bufferLen)

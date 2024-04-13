@@ -16,3 +16,10 @@
 
 # Disk-based bleve store
 *.bleve
+
+welcome1/
+*.code-workspace
+launch.json
+*.db
+!sn.yaml
+*.yaml

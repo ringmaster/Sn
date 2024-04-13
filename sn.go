@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/alecthomas/kong"
+	"github.com/olekukonko/tablewriter"
 	"github.com/ringmaster/Sn/sn"
 )
 
@@ -31,7 +32,7 @@ func serve() {
 }
 
 func sql(query string) {
-	fmt.Printf("Running Query: %s\n", query)
+	fmt.Printf("Connecting to Database\n")
 	sn.ConfigSetup()
 
 	sn.RegisterTemplateHelpers()
@@ -39,16 +40,24 @@ func sql(query string) {
 
 	sn.DBConnect()
 	defer sn.DBClose()
-	sn.DBLoadRepos()
+	sn.DBLoadReposSync()
+	fmt.Printf("Running Query: %s\n", query)
 
-	//rows, err := sn.DBQuery(query)
+	rows, _ := sn.DBQuery(query)
+	fmt.Printf("Query Complete\n")
 
-	//slug := "welcome"
-	qry := sn.ItemQuery{PerPage: 5, Page: 1}
+	cols, _ := rows.Columns()
 
-	result := sn.ItemsFromItemQuery(qry)
+	result, _ := sn.RowToMapSlice(rows)
 
-	fmt.Printf("Result:\n%#v\n\n", result)
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader(cols)
+
+	for _, v := range result {
+		table.Append(v)
+	}
+	table.Render() // Send output
+
 }
 
 func main() {

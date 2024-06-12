@@ -73,6 +73,9 @@ func RegisterTemplateHelpers() {
 	raymond.RegisterHelper("debug", func(str any, options *raymond.Options) string {
 		return fmt.Sprintf(`<pre style="">%s</pre>`, str)
 	})
+	raymond.RegisterHelper("d", func(options *raymond.Options) string {
+		return fmt.Sprintf(`<pre style="">%s</pre>`, options.Ctx())
+	})
 	raymond.RegisterHelper("dateformat", func(t time.Time, format string) string {
 		return t.Format(format)
 	})

@@ -157,7 +157,7 @@ func DBLoadReposSync() {
 			panic(fmt.Sprintf("Repo path %s does not exist", repoPath))
 		}
 
-		errz := filepath.Walk(repoPath, func(path string, info os.FileInfo, err error) error {
+		errz := filepath.Walk(repoPath, func(path string, info os.FileInfo, _ error) error {
 			if info.IsDir() {
 				return nil
 			}

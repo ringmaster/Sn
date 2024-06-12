@@ -125,6 +125,7 @@ func templateHandler(w http.ResponseWriter, r *http.Request, routeName string) {
 	context["pathvars"] = mux.Vars(r)
 	context["params"] = r.URL.Query()
 	context["post"] = nil
+	context["url"] = r.URL
 
 	// Find the itemquery instances, loop over, assign results to context
 	for outVarName := range viper.GetStringMap(fmt.Sprintf("%s.out", routeConfigLocation)) {
@@ -310,7 +311,7 @@ func WebserverStart() {
 	setupRoutes(router)
 	http.Handle("/", etag.Handler(handlers.CompressHandler(router), false))
 
-	if viper.IsSet("ssldomains") {
+	if viper.IsSet("ssldomains") && viper.GetBool("use_ssl") {
 		certManager := autocert.Manager{
 			Prompt:     autocert.AcceptTOS,
 			HostPolicy: autocert.HostWhitelist(viper.GetStringSlice("ssldomains")...), //Your domain here

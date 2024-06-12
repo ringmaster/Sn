@@ -15,6 +15,9 @@ import (
 func ConfigSetup() {
 	viper.SetConfigName("sn")
 	viper.AddConfigPath(".")
+	viper.SetEnvPrefix("SN")
+	viper.AutomaticEnv()
+	viper.SetDefault("use_ssl", true)
 	if snConfigFile := os.Getenv("SN_CONFIG"); snConfigFile != "" {
 		snConfigFile, _ := filepath.Abs(snConfigFile)
 		viper.SetConfigFile(snConfigFile)

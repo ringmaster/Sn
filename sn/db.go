@@ -589,6 +589,7 @@ func ItemsFromItemQuery(qry ItemQuery) ItemResult {
 	items = make([]Item, 0)
 
 	front := (qry.Page - 1) * qry.PerPage
+	pg = qry.Page
 
 	var sql string = `FROM items
 	LEFT JOIN items_authors ON items.id = items_authors.item_id
@@ -685,7 +686,10 @@ func replaceParams(values map[string]interface{}, params map[string]string) map[
 	for k1, v1 := range values {
 		temp := v1
 		for k, v := range params {
-			temp = strings.ReplaceAll(temp.(string), fmt.Sprintf("{%s}", k), v)
+			switch nv := temp.(type) {
+			case string:
+				temp = strings.ReplaceAll(nv, fmt.Sprintf("{%s}", k), v)
+			}
 		}
 		values[k1] = temp
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"path"
@@ -128,13 +129,31 @@ func templateHandler(w http.ResponseWriter, r *http.Request, routeName string) {
 	// Find the itemquery instances, loop over, assign results to context
 	for outVarName := range viper.GetStringMap(fmt.Sprintf("%s.out", routeConfigLocation)) {
 		qlocation := fmt.Sprintf("%s.out.%s", routeConfigLocation, outVarName)
-		outvals := viper.GetStringMap(qlocation)
-		itemResult := ItemsFromOutvals(outvals, context)
 
-		context[outVarName] = itemResult
-		if len(itemResult.Items) == 0 && outvals["404_on_empty"] != nil {
-			templateHandler(w, r, outvals["404_on_empty"].(string))
-			return
+		outval := viper.Get(qlocation)
+		switch v := outval.(type) {
+		case bool, int, string:
+			routeParameters := mux.Vars(r)
+			for param, param_value := range r.URL.Query() {
+				routeParameters[fmt.Sprintf("params.%s", param)] = param_value[0]
+			}
+			temp := v
+			for k1, v1 := range routeParameters {
+				switch nv := temp.(type) {
+				case string:
+					temp = strings.ReplaceAll(nv, fmt.Sprintf("{%s}", k1), v1)
+				}
+			}
+
+			context[outVarName] = temp
+		default:
+			outvals := maps.Clone(viper.GetStringMap(qlocation))
+			itemResult := ItemsFromOutvals(outvals, context)
+			context[outVarName] = itemResult
+			if len(itemResult.Items) == 0 && outvals["404_on_empty"] != nil {
+				templateHandler(w, r, outvals["404_on_empty"].(string))
+				return
+			}
 		}
 	}
 
@@ -180,6 +199,38 @@ func catchallHandler(w http.ResponseWriter, r *http.Request) {
 	templateHandler(w, r, routeName)
 }
 
+func fingerHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Content-Type", "application/activity+json")
+	w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	w.Header().Add("X-Frame-Options", "SAMEORIGIN")
+	w.Header().Add("X-Content-Type-Options", "nosniff")
+	w.Header().Add("Upgrade-Insecure-Requests", "1")
+	w.Header().Add("Referrer-Policy", "strict-origin-when-cross-origin")
+	w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
+	w.WriteHeader(200)
+
+	rendered := `{  
+		"subject": "acct:ringmaster@asymptomatic.net",
+		"aliases": [
+		  "https://asymptomatic.net/@ringmaster"
+		],
+		"links": [
+		  {
+			"rel": "self",
+			"type": "application/activity+json",
+			"href": "https://asymptomatic.net/@ringmaster"
+		  },
+		  {
+			"rel":"http://webfinger.net/rel/profile-page",
+			"type":"text/html",
+			"href":"https://asymptomatic.net/"
+		  }
+		]
+	}`
+
+	w.Write([]byte(rendered))
+}
+
 func customFileServer(fs http.FileSystem) http.Handler {
 	fileServer := http.FileServer(fs)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -202,6 +253,8 @@ func setRootUrl(r *http.Request) {
 }
 
 func setupRoutes(router *mux.Router) {
+	router.HandleFunc("/.well-known/webfinger", fingerHandler).Name("well-known-webfinger")
+
 	routelist := make([]string, 0, len(viper.GetStringMap("routes")))
 	for key := range viper.GetStringMap("routes") {
 		routelist = append(routelist, key)

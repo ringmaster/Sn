@@ -71,7 +71,7 @@ func RegisterTemplateHelpers() {
 		return fmt.Sprintf("<pre>%s</pre>", str)
 	})
 	raymond.RegisterHelper("debug", func(str any, options *raymond.Options) string {
-		return fmt.Sprintf(`<pre style="">%#v</pre>`, str)
+		return fmt.Sprintf(`<pre style="">%s</pre>`, str)
 	})
 	raymond.RegisterHelper("dateformat", func(t time.Time, format string) string {
 		return t.Format(format)
@@ -124,9 +124,10 @@ func RegisterTemplateHelpers() {
 		return summary
 	})
 	raymond.RegisterHelper("paginate", func(pagelist ItemResult, distance int, options *raymond.Options) raymond.SafeString {
-		paginator := ""
-		min := MinOf(pagelist.Page-distance, 1)
-		max := MaxOf(pagelist.Page+distance, pagelist.Pages)
+		pagelist.Page = MaxOf(1, pagelist.Page)
+		min := MaxOf(pagelist.Page-distance, 1)
+		max := MinOf(pagelist.Page+distance, pagelist.Pages)
+		paginator := fmt.Sprintf("<!-- Paginator  min: %d  max: %d  pages: %d  page: %d  distance: %d -->", min, max, pagelist.Pages, pagelist.Page, distance)
 		for pg := min; pg <= max; pg++ {
 			ctx := map[string]interface{}{"page": pg, "active": pg == pagelist.Page}
 			paginator += options.FnWith(ctx)
@@ -150,11 +151,18 @@ func RegisterTemplateHelpers() {
 	raymond.RegisterHelper("block", func(name string, options *raymond.Options) raymond.SafeString {
 		content := options.DataFrame().Get(name)
 
+		retval := raymond.SafeString(options.HashStr("prefix"))
+
 		if content == nil {
-			return raymond.SafeString(options.Fn())
+			if options.Fn() != "" {
+				retval += raymond.SafeString(options.Fn())
+			} else {
+				retval = ""
+			}
 		} else {
-			return raymond.SafeString(content.(string))
+			retval += raymond.SafeString(content.(string))
 		}
+		return retval
 	})
 	raymond.RegisterHelper("delimit", func(items []string, delimiter string, options *raymond.Options) raymond.SafeString {
 		return raymond.SafeString(strings.Join(items, delimiter))

@@ -1,6 +1,7 @@
 package sn
 
 import (
+	"fmt"
 	"os"
 )
 
@@ -13,7 +14,7 @@ func MinOf(vars ...int) int {
 	min := vars[0]
 
 	for _, i := range vars {
-		if min < i {
+		if i < min {
 			min = i
 		}
 	}
@@ -22,15 +23,15 @@ func MinOf(vars ...int) int {
 }
 
 func MaxOf(vars ...int) int {
-	min := vars[0]
+	max := vars[0]
 
 	for _, i := range vars {
-		if min > i {
-			min = i
+		if i > max {
+			max = i
 		}
 	}
 
-	return min
+	return max
 }
 
 func CopyMap(m map[string]interface{}) map[string]interface{} {
@@ -43,4 +44,18 @@ func CopyMap(m map[string]interface{}) map[string]interface{} {
 	}
 
 	return cp
+}
+
+func PrintMap(data map[string]interface{}, indent string) string {
+	output := ""
+	for key, value := range data {
+		// Check if the value is a nested map
+		if nestedMap, ok := value.(map[string]interface{}); ok {
+			output += fmt.Sprintf("%sKey: %s, Value: \n", indent, key)
+			PrintMap(nestedMap, indent+"  ") // Recursive call with increased indentation
+		} else {
+			output += fmt.Sprintf("%sKey: %s, Value: %v\n", indent, key, value)
+		}
+	}
+	return output
 }

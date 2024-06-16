@@ -23,3 +23,7 @@ launch.json
 *.db
 !sn.yaml
 *.yaml
+private.pem
+public.pem
+test/schema.sql
+sn/Sn

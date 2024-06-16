@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"maps"
@@ -15,6 +16,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/go-http-utils/etag"
@@ -25,6 +30,14 @@ import (
 )
 
 var router *mux.Router
+
+type SpacesConfig struct {
+	SpaceName   string
+	Endpoint    string
+	AccessKeyID string
+	SecretKey   string
+	Region      string
+}
 
 func gitHandler(w http.ResponseWriter, r *http.Request) {
 	routeName := mux.CurrentRoute(r).GetName()
@@ -72,6 +85,121 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
 
 	w.Write([]byte(commit.Hash.String() + ": " + commit.Message))
+}
+
+func uploadFormHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	formHTML := `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Upload File</title>
+        </head>
+        <body>
+            <h1>Upload File</h1>
+            <form method="post" enctype="multipart/form-data">
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" required><br><br>
+                <label for="file">File:</label>
+                <input type="file" id="file" name="file" required><br><br>
+                <input type="submit" value="Upload">
+            </form>
+        </body>
+        </html>
+    `
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, formHTML)
+}
+
+func uploadHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		uploadFormHandler(w, r)
+		return
+	}
+
+	routeName := mux.CurrentRoute(r).GetName()
+	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
+
+	uploadConfigLocation := fmt.Sprintf("%s.s3", routeConfigLocation)
+	spaceConfigName := viper.GetString(uploadConfigLocation)
+	spaceConfData := viper.GetStringMapString(fmt.Sprintf("s3.%s", spaceConfigName))
+
+	// Check the password
+	password := r.FormValue("password")
+	if password != "your-pre-determined-password" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	spaceConf := SpacesConfig{
+		SpaceName:   spaceConfData["spacename"],
+		Endpoint:    spaceConfData["endpoint"],
+		Region:      spaceConfData["region"],
+		AccessKeyID: spaceConfData["accesskeyid"],
+		SecretKey:   spaceConfData["secretkey"],
+	}
+
+	err = uploadToSpaces(file, header.Filename, spaceConf)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	output := fmt.Sprintf("{cdn: \"%s%s\"}", spaceConfData["cdn"], header.Filename)
+
+	w.Header().Add("Content-Type", "application/json")
+	w.Write([]byte(output))
+}
+
+func uploadToSpaces(file io.ReadSeeker, filename string, spaceConf SpacesConfig) error {
+	s3Config := &aws.Config{
+		Credentials:      credentials.NewStaticCredentials(spaceConf.AccessKeyID, spaceConf.SecretKey, ""), // Specifies your credentials.
+		Endpoint:         aws.String(spaceConf.Endpoint),                                                   // Find your endpoint in the control panel, under Settings. Prepend "https://".
+		S3ForcePathStyle: aws.Bool(false),                                                                  // // Configures to use subdomain/virtual calling format. Depending on your version, alternatively use o.UsePathStyle = false
+		Region:           aws.String(spaceConf.Region),                                                     // Must be "us-east-1" when creating new Spaces. Otherwise, use the region in your endpoint, such as "nyc3".
+	}
+
+	// Step 3: The new session validates your request and directs it to your Space's specified endpoint using the AWS SDK.
+	newSession, err := session.NewSession(s3Config)
+	if err != nil {
+		fmt.Println(err)
+	}
+	s3Client := s3.New(newSession)
+
+	// Step 4: Define the parameters of the object you want to upload.
+	object := s3.PutObjectInput{
+		Bucket:             &spaceConf.SpaceName,      // The path to the directory you want to upload the object to, starting with your Space name.
+		Key:                &filename,                 // Object key, referenced whenever you want to access this file later.
+		Body:               file,                      // The object's contents.
+		ACL:                aws.String("public-read"), // Defines Access-control List (ACL) permissions, such as private or public.
+		ContentType:        aws.String("image/jpeg"),
+		ContentDisposition: aws.String("inline"),
+		Metadata: map[string]*string{ // Required. Defines metadata tags.
+			"x-uploaded-by": aws.String("Sn"),
+		},
+	}
+
+	// Step 5: Run the PutObject function with your parameters, catching for errors.
+	_, err = s3Client.PutObject(&object)
+	if err != nil {
+		fmt.Println(err.Error())
+		fmt.Println(s3Config)
+		fmt.Println(object)
+	}
+
+	return nil
 }
 
 func debugHandler(w http.ResponseWriter, r *http.Request) {
@@ -279,6 +407,8 @@ func setupRoutes(router *mux.Router) {
 				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customFileServer(http.Dir(dir)))).Name(routeName)
 				//router.PathPrefix(routePath).Handler(spaHandler{staticPath: http.Dir(dir), indexPath: "index.html"})
 			}
+		case "upload":
+			router.HandleFunc(routePath, uploadHandler).Name(routeName)
 		case "git":
 			router.HandleFunc(routePath, gitHandler).Name(routeName)
 		case "debug":

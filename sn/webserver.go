@@ -27,6 +27,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/acme/autocert"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var router *mux.Router
@@ -129,9 +130,11 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	spaceConfigName := viper.GetString(uploadConfigLocation)
 	spaceConfData := viper.GetStringMapString(fmt.Sprintf("s3.%s", spaceConfigName))
 
+	uploadPasswordHash := viper.GetString(fmt.Sprintf("%s.passwordhash", routeConfigLocation))
+
 	// Check the password
 	password := r.FormValue("password")
-	if password != "your-pre-determined-password" {
+	if nil != bcrypt.CompareHashAndPassword([]byte(uploadPasswordHash), []byte(password)) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -186,6 +189,7 @@ func uploadToSpaces(file io.ReadSeeker, filename string, spaceConf SpacesConfig)
 		ACL:                aws.String("public-read"), // Defines Access-control List (ACL) permissions, such as private or public.
 		ContentType:        aws.String("image/jpeg"),
 		ContentDisposition: aws.String("inline"),
+		CacheControl:       aws.String("max-age=2592000,public"),
 		Metadata: map[string]*string{ // Required. Defines metadata tags.
 			"x-uploaded-by": aws.String("Sn"),
 		},

@@ -73,6 +73,20 @@ func RegisterTemplateHelpers() {
 	raymond.RegisterHelper("debug", func(str any, options *raymond.Options) string {
 		return fmt.Sprintf(`<pre style="">%s</pre>`, str)
 	})
+	raymond.RegisterHelper("s3", func(src string, options *raymond.Options) string {
+		regex := regexp.MustCompile(`s3://(?P<bucket>[^/]+)/(?P<filename>.+)`)
+
+		match := regex.FindStringSubmatch(src)
+		if match != nil {
+			bucket := match[1]
+			filename := match[2]
+			cdnURL := viper.GetString(fmt.Sprintf("s3.%s.cdn", bucket))
+			newSrc := cdnURL + filename
+			return newSrc
+		}
+
+		return src
+	})
 	raymond.RegisterHelper("d", func(options *raymond.Options) string {
 		return fmt.Sprintf(`<pre style="">%s</pre>`, options.Ctx())
 	})

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/araddon/dateparse"
 	"github.com/arpitgogia/rake"
 	"github.com/radovskyb/watcher"
@@ -345,6 +346,8 @@ func loadItem(repoName string, repoPath string, filename string) (Item, error) {
 		item.Html = buf.String()
 	}
 
+	item.Html, _ = replaceImgSrc(item.Html)
+
 	// Get Categories from frontmatter
 	var categories []string
 	if _, ok := f["categories"]; ok {
@@ -414,6 +417,44 @@ func loadItem(repoName string, repoPath string, filename string) (Item, error) {
 	item.Date, _ = dateparse.ParseLocal(item.RawDate)
 
 	return item, nil
+}
+
+func replaceImgSrc(html string) (string, error) {
+	// Define the regex to extract bucket and filename
+	regex := regexp.MustCompile(`s3://(?P<bucket>[^/]+)/(?P<filename>.+)`)
+
+	// Load the HTML document
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader([]byte(html)))
+	if err != nil {
+		return "", err
+	}
+
+	// Find all img elements with src attribute starting with "s3://"
+	doc.Find("img[src^='s3://']").Each(func(index int, item *goquery.Selection) {
+		src, exists := item.Attr("src")
+		if exists {
+			match := regex.FindStringSubmatch(src)
+			if match != nil {
+				bucket := match[1]
+				filename := match[2]
+				cdnURL := viper.GetString(fmt.Sprintf("s3.%s.cdn", bucket))
+				newSrc := cdnURL + filename
+				item.SetAttr("src", newSrc)
+			}
+		}
+	})
+
+	// Get the updated HTML
+	var buf bytes.Buffer
+	doc.Find("html").Each(func(index int, item *goquery.Selection) {
+		html, err := item.Html()
+		if err != nil {
+			log.Fatalf("Error extracting HTML: %v", err)
+		}
+		buf.WriteString(html)
+	})
+
+	return buf.String(), nil
 }
 
 func insertItem(item Item) (int64, error) {

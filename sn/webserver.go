@@ -8,6 +8,8 @@ import (
 	"log"
 	"log/slog"
 	"maps"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path"
@@ -146,6 +148,13 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	// Determine the content type
+	contentType, err := determineContentType(file, header)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	spaceConf := SpacesConfig{
 		SpaceName:   spaceConfData["spacename"],
 		Endpoint:    spaceConfData["endpoint"],
@@ -154,7 +163,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		SecretKey:   spaceConfData["secretkey"],
 	}
 
-	err = uploadToSpaces(file, header.Filename, spaceConf)
+	err = uploadToSpaces(file, header.Filename, spaceConf, contentType)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -166,7 +175,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(output))
 }
 
-func uploadToSpaces(file io.ReadSeeker, filename string, spaceConf SpacesConfig) error {
+func uploadToSpaces(file io.ReadSeeker, filename string, spaceConf SpacesConfig, contentType string) error {
 	s3Config := &aws.Config{
 		Credentials:      credentials.NewStaticCredentials(spaceConf.AccessKeyID, spaceConf.SecretKey, ""), // Specifies your credentials.
 		Endpoint:         aws.String(spaceConf.Endpoint),                                                   // Find your endpoint in the control panel, under Settings. Prepend "https://".
@@ -187,7 +196,7 @@ func uploadToSpaces(file io.ReadSeeker, filename string, spaceConf SpacesConfig)
 		Key:                &filename,                 // Object key, referenced whenever you want to access this file later.
 		Body:               file,                      // The object's contents.
 		ACL:                aws.String("public-read"), // Defines Access-control List (ACL) permissions, such as private or public.
-		ContentType:        aws.String("image/jpeg"),
+		ContentType:        aws.String(contentType),
 		ContentDisposition: aws.String("inline"),
 		CacheControl:       aws.String("max-age=2592000,public"),
 		Metadata: map[string]*string{ // Required. Defines metadata tags.
@@ -204,6 +213,35 @@ func uploadToSpaces(file io.ReadSeeker, filename string, spaceConf SpacesConfig)
 	}
 
 	return nil
+}
+
+func determineContentType(file multipart.File, header *multipart.FileHeader) (string, error) {
+	// Read a chunk to determine content type
+	buf := make([]byte, 512)
+	_, err := file.Read(buf)
+	if err != nil {
+		return "", fmt.Errorf("unable to read file to determine content type: %v", err)
+	}
+
+	// Reset the file pointer to the beginning
+	_, err = file.Seek(0, io.SeekStart)
+	if err != nil {
+		return "", fmt.Errorf("unable to reset file pointer: %v", err)
+	}
+
+	// Detect the content type
+	contentType := http.DetectContentType(buf)
+
+	// Fallback to the extension-based content type
+	if contentType == "application/octet-stream" {
+		ext := filepath.Ext(header.Filename)
+		mimeType := mime.TypeByExtension(ext)
+		if mimeType != "" {
+			contentType = mimeType
+		}
+	}
+
+	return contentType, nil
 }
 
 func debugHandler(w http.ResponseWriter, r *http.Request) {
@@ -367,12 +405,25 @@ func fingerHandler(w http.ResponseWriter, r *http.Request) {
 func customFileServer(fs http.FileSystem) http.Handler {
 	fileServer := http.FileServer(fs)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, err := fs.Open(path.Clean(r.URL.Path)) // Do not allow path traversals.
+		filePath := path.Clean(r.URL.Path)
+		file, err := fs.Open(filePath) // Do not allow path traversals.
 		if os.IsNotExist(err) {
-			fmt.Fprintf(w, "404: Cannot find %#v", path.Clean(r.URL.Path))
-
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprintf(w, "404: Cannot find %#v", filePath)
 			return
 		}
+		defer file.Close()
+
+		// Determine the MIME type based on the file extension
+		ext := filepath.Ext(filePath)
+		mimeType := mime.TypeByExtension(ext)
+		if mimeType != "" {
+			w.Header().Set("Content-Type", mimeType)
+		} else {
+			// Default to a binary stream if MIME type is unknown
+			w.Header().Set("Content-Type", "application/octet-stream")
+		}
+
 		fileServer.ServeHTTP(w, r)
 	})
 }

@@ -169,7 +169,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	output := fmt.Sprintf("{cdn: \"%s%s\"}", spaceConfData["cdn"], header.Filename)
+	output := fmt.Sprintf("{\"cdn\": \"%s%s\"}", spaceConfData["cdn"], header.Filename)
 
 	w.Header().Add("Content-Type", "application/json")
 	w.Write([]byte(output))

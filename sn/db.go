@@ -20,6 +20,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/araddon/dateparse"
 	"github.com/arpitgogia/rake"
+	attributes "github.com/mdigger/goldmark-attributes"
 	"github.com/radovskyb/watcher"
 	"github.com/spf13/viper"
 	"github.com/yuin/goldmark"
@@ -296,6 +297,7 @@ func loadItem(repoName string, repoPath string, filename string) (Item, error) {
 			emoji.Emoji,
 			highlighting.Highlighting,
 			extension.Typographer,
+			attributes.Extension,
 		),
 		goldmark.WithParserOptions(
 			parser.WithBlockParsers(),

@@ -140,6 +140,26 @@ func RegisterTemplateHelpers() {
 
 		return summary
 	})
+	raymond.RegisterHelper("head", func(html string, count int, options *raymond.Options) string {
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+		if err != nil {
+			return "<p>NewDocument() error</p>" + html
+		}
+
+		result := ""
+
+		doc.Find("p").EachWithBreak(func(i int, sel *goquery.Selection) bool {
+			if err == nil {
+				if sel.Text() != "" {
+					result = sel.Text()
+					return false
+				}
+			}
+			return true
+		})
+
+		return result[0:count]
+	})
 	raymond.RegisterHelper("paginate", func(pagelist ItemResult, distance int, options *raymond.Options) raymond.SafeString {
 		pagelist.Page = MaxOf(1, pagelist.Page)
 		min := MaxOf(pagelist.Page-distance, 1)

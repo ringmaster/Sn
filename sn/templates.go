@@ -158,7 +158,7 @@ func RegisterTemplateHelpers() {
 			return true
 		})
 
-		return result[0:count]
+		return result[0 : MinOf(count, len(result))-1]
 	})
 	raymond.RegisterHelper("paginate", func(pagelist ItemResult, distance int, options *raymond.Options) raymond.SafeString {
 		pagelist.Page = MaxOf(1, pagelist.Page)

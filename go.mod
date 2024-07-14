@@ -4,13 +4,18 @@ go 1.19
 
 require (
 	github.com/PuerkitoBio/goquery v1.9.1
+	github.com/alecthomas/kong v0.8.1
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/arpitgogia/rake v0.0.0-20180919172115-eef46a94533f
+	github.com/aws/aws-sdk-go v1.54.2
 	github.com/aymerick/raymond v2.0.2+incompatible
 	github.com/go-git/go-git/v5 v5.11.0
 	github.com/go-http-utils/etag v0.0.0-20161124023236-513ea8f21eb1
+	github.com/gorilla/feeds v1.2.0
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
+	github.com/mdigger/goldmark-attributes v0.0.0-20210529130523-52da21a6bf2b
+	github.com/olekukonko/tablewriter v0.0.5
 	github.com/radovskyb/watcher v1.0.7
 	github.com/spf13/viper v1.18.2
 	github.com/yuin/goldmark v1.7.0
@@ -27,10 +32,8 @@ require (
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/ProtonMail/go-crypto v1.0.0 // indirect
 	github.com/alecthomas/chroma/v2 v2.12.0 // indirect
-	github.com/alecthomas/kong v0.8.1 // indirect
 	github.com/alecthomas/repr v0.2.0 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
-	github.com/aws/aws-sdk-go v1.54.2 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.27.2 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.2 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.27.18 // indirect
@@ -76,12 +79,10 @@ require (
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.10 // indirect
-	github.com/mdigger/goldmark-attributes v0.0.0-20210529130523-52da21a6bf2b // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
-	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.1.1 // indirect
 	github.com/pjbgf/sha1cd v0.3.0 // indirect

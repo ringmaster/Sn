@@ -545,6 +545,7 @@ func setupRoutes(router *mux.Router) {
 		case "feed":
 			router.NewRoute().HeadersRegexp("Accept", "rss").Name(routeName).Path(routePath).HandlerFunc(rssHandler)
 			router.NewRoute().HeadersRegexp("Accept", "atom").Name(routeName).Path(routePath).HandlerFunc(atomHandler)
+			router.NewRoute().Name(routeName).Path(routePath).HandlerFunc(rssHandler) // I hate this
 		case "redirect":
 		default:
 			router.HandleFunc(routePath, catchallHandler).Name(routeName)

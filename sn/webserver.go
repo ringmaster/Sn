@@ -1,10 +1,13 @@
 package sn
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"embed"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"log/slog"
 	"maps"
@@ -32,6 +35,26 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/crypto/bcrypt"
 )
+
+//go:embed all:frontend
+var frontend embed.FS
+
+// FileSystem is an interface that includes the methods required by both embed.FS and http.FileSystem.
+type FileSystem interface {
+	Open(name string) (fs.File, error)
+	ReadDir(name string) ([]fs.DirEntry, error)
+}
+
+type httpFS struct {
+	http.Dir
+}
+
+func (fs httpFS) Open(name string) (fs.File, error) {
+	return fs.Dir.Open(name)
+}
+func (fs httpFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	return fs.ReadDir(name)
+}
 
 var router *mux.Router
 
@@ -476,29 +499,52 @@ func fingerHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(rendered))
 }
 
-func customFileServer(fs http.FileSystem) http.Handler {
-	fileServer := http.FileServer(fs)
+func customFileServer(fs FileSystem, routeName string, prefix string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		filePath := path.Clean(r.URL.Path)
+		filePath := filepath.Join(prefix, path.Clean(r.URL.Path))
 		file, err := fs.Open(filePath) // Do not allow path traversals.
 		if os.IsNotExist(err) {
 			w.WriteHeader(http.StatusNotFound)
-			fmt.Fprintf(w, "404: Cannot find %#v", filePath)
+			fmt.Fprintf(w, "404: %s Cannot find %#v", routeName, filePath)
 			return
 		}
 		defer file.Close()
 
-		// Determine the MIME type based on the file extension
-		ext := filepath.Ext(filePath)
-		mimeType := mime.TypeByExtension(ext)
-		if mimeType != "" {
-			w.Header().Set("Content-Type", mimeType)
-		} else {
-			// Default to a binary stream if MIME type is unknown
-			w.Header().Set("Content-Type", "application/octet-stream")
+		stat, err := file.Stat()
+		if err != nil {
+			http.Error(w, "File not found", http.StatusNotFound)
+			return
 		}
 
-		fileServer.ServeHTTP(w, r)
+		if stat.IsDir() {
+			fmt.Printf("Directory: %s\n", filePath)
+			entries, err := fs.ReadDir(filePath)
+			if err != nil {
+				http.Error(w, "Error reading directory", http.StatusInternalServerError)
+				return
+			}
+
+			var buf bytes.Buffer
+			buf.WriteString("<html><body><ul>")
+			for _, entry := range entries {
+				name := entry.Name()
+				link := filepath.Join(r.URL.Path, name)
+				buf.WriteString(fmt.Sprintf("<li><a href=\"%s\">%s</a></li>", link, name))
+			}
+			buf.WriteString("</ul></body></html>")
+
+			w.Header().Set("Content-Type", "text/html")
+			w.Write(buf.Bytes())
+			return
+		}
+
+		content, err := io.ReadAll(file)
+		if err != nil {
+			http.Error(w, "Error reading file", http.StatusInternalServerError)
+			return
+		}
+		reader := bytes.NewReader(content)
+		http.ServeContent(w, r, stat.Name(), stat.ModTime(), reader)
 	})
 }
 
@@ -524,6 +570,8 @@ func setupRoutes(router *mux.Router) {
 		switch viper.GetString(fmt.Sprintf("%s.handler", routeConfigLocation)) {
 		case "posts":
 			router.HandleFunc(routePath, postHandler).Name(routeName)
+		case "frontend":
+			router.PathPrefix(routePath).Handler(http.StripPrefix(routePath+"/", customFileServer(frontend, routeName, "frontend"))).Name(routeName)
 		case "static":
 			if viper.IsSet(fmt.Sprintf("%s.file", routeConfigLocation)) {
 				file := ConfigPath(fmt.Sprintf("%s.file", routeConfigLocation), OptionallyExist())
@@ -533,7 +581,7 @@ func setupRoutes(router *mux.Router) {
 			} else {
 				dir := ConfigPath(fmt.Sprintf("%s.dir", routeConfigLocation))
 				//router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, http.FileServer(http.Dir(dir))))
-				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customFileServer(http.Dir(dir)))).Name(routeName)
+				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customFileServer(httpFS{http.Dir(dir)}, routeName, ""))).Name(routeName)
 				//router.PathPrefix(routePath).Handler(spaHandler{staticPath: http.Dir(dir), indexPath: "index.html"})
 			}
 		case "upload":

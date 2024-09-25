@@ -13,8 +13,8 @@ port: 8080
 # path - The "root path" for all referenced files here, relative to this file or an absolute path
 path: welcome
 # dbfile - The name of a database file or leave blank to use an in-memory database
-# dbfile: 'file:sn?mode=memory&cache=shared'
-dbfile: 'asy.db'
+dbfile: 'file:sn?mode=memory&cache=shared'
+# dbfile: 'asy.db'
 # cleandb - true/false whether to start with a fresh database every time the app starts
 cleandb: true
 # template_dir - A directory inside of the root path where templates are stored
@@ -87,6 +87,9 @@ routes:
         search: "{params.s}"
         paginate_name: page
         paginate_count: 5
+  98_frontend:
+    path: /_/frontend
+    handler: frontend
   99_debug:
     path: /_/debug
     handler: debug

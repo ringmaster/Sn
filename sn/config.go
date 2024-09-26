@@ -9,10 +9,27 @@ import (
 	"path/filepath"
 	"text/template"
 
+	"github.com/go-git/go-git/v5/plumbing/transport/http"
+
+	"github.com/c4milo/afero2billy"
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/storage/memory"
+	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 )
 
 func ConfigSetup() {
+	if snGitRepo := os.Getenv("SN_GIT_REPO"); snGitRepo != "" {
+		// Assuming you have a function `CloneRepoToVFS` that clones the repo to a virtual filesystem
+		vfs, err := CloneRepoToVFS(snGitRepo)
+		if err != nil {
+			slog.Error(fmt.Sprintf("Error while cloning git repo: %v", err))
+			return
+		}
+		// Set the virtual filesystem as the source for viper config
+		viper.SetFs(vfs)
+	}
+
 	viper.SetConfigName("sn")
 	viper.AddConfigPath(".")
 	viper.SetEnvPrefix("SN")
@@ -32,6 +49,39 @@ func ConfigSetup() {
 		}
 	}
 	viper.SetDefault("path", filepath.Dir(viper.ConfigFileUsed()))
+}
+
+func CloneRepoToVFS(snGitRepo string) (afero.Fs, error) {
+	// Create an in-memory filesystem
+	fs := afero.NewMemMapFs()
+
+	billyFs := afero2billy.New(fs)
+
+	// Retrieve username and password from environment variables
+	username := os.Getenv("SN_GIT_USERNAME")
+	password := os.Getenv("SN_GIT_PASSWORD")
+
+	// Set up clone options with or without authentication
+	cloneOptions := &git.CloneOptions{
+		URL: snGitRepo,
+	}
+
+	if username != "" && password != "" {
+		cloneOptions.Auth = &http.BasicAuth{
+			Username: username, // can be anything except an empty string
+			Password: password,
+		}
+	}
+
+	// Clone the given repository to the in-memory filesystem
+	_, err := git.Clone(memory.NewStorage(), billyFs, cloneOptions)
+	if err != nil {
+		slog.Error(fmt.Sprintf("Failed to clone repository: %s", err))
+		return nil, err
+	}
+
+	slog.Info("Repository cloned successfully to virtual filesystem")
+	return fs, nil
 }
 
 func ConfigStringDefault(configLocation string, defaultVal string) string {

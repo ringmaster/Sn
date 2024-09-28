@@ -31,6 +31,7 @@ import (
 	"github.com/gorilla/feeds"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
+	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/crypto/bcrypt"
@@ -499,26 +500,50 @@ func fingerHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(rendered))
 }
 
-func customFileServer(fs FileSystem, routeName string, prefix string) http.Handler {
+func customFileServer(fs afero.Fs, file string) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		fileContents, err := fs.Open(file)
+		if err != nil {
+			http.Error(rw, "File not found", http.StatusNotFound)
+			return
+		}
+		defer fileContents.Close()
+		content, err := io.ReadAll(fileContents)
+		if err != nil {
+			http.Error(rw, "Error reading file", http.StatusInternalServerError)
+			return
+		}
+		http.ServeContent(rw, r, path.Base(file), time.Now(), bytes.NewReader(content))
+	})
+}
+
+func customDirServer(fs afero.Fs, routeName string, prefix string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		filePath := filepath.Join(prefix, path.Clean(r.URL.Path))
-		file, err := fs.Open(filePath) // Do not allow path traversals.
+		slog.Info("serving file", "route", routeName, "path", r.URL.Path)
+		upath := r.URL.Path
+		if strings.HasSuffix(r.URL.Path, "/") {
+			upath = path.Join(upath, "index.html")
+		}
+
+		filePath := filepath.Join(prefix, path.Clean(upath))
+		file, err := fs.Open(filePath)
 		if os.IsNotExist(err) {
 			w.WriteHeader(http.StatusNotFound)
-			fmt.Fprintf(w, "404: %s Cannot find %#v", routeName, filePath)
+			http.Error(w, fmt.Sprintf("404: %s Cannot find %#v", routeName, filePath), http.StatusNotFound)
 			return
 		}
 		defer file.Close()
 
 		stat, err := file.Stat()
 		if err != nil {
-			http.Error(w, "File not found", http.StatusNotFound)
+			fmt.Fprintf(w, "404: %s Cannot find %#v", routeName, filePath)
+			http.Error(w, fmt.Sprintf("404: %s Cannot find %#v", routeName, filePath), http.StatusNotFound)
 			return
 		}
 
 		if stat.IsDir() {
 			fmt.Printf("Directory: %s\n", filePath)
-			entries, err := fs.ReadDir(filePath)
+			entries, err := afero.ReadDir(fs, filePath)
 			if err != nil {
 				http.Error(w, "Error reading directory", http.StatusInternalServerError)
 				return
@@ -571,18 +596,15 @@ func setupRoutes(router *mux.Router) {
 		case "posts":
 			router.HandleFunc(routePath, postHandler).Name(routeName)
 		case "frontend":
-			router.PathPrefix(routePath).Handler(http.StripPrefix(routePath+"/", customFileServer(frontend, routeName, "frontend"))).Name(routeName)
+			router.PathPrefix(routePath).Handler(http.StripPrefix(routePath+"/", customDirServer(afero.FromIOFS{FS: frontend}, routeName, "frontend"))).Name(routeName)
+			router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customDirServer(afero.FromIOFS{FS: frontend}, routeName, "frontend"))).Name(routeName + "_dir")
 		case "static":
 			if viper.IsSet(fmt.Sprintf("%s.file", routeConfigLocation)) {
 				file := ConfigPath(fmt.Sprintf("%s.file", routeConfigLocation), OptionallyExist())
-				router.HandleFunc(routePath, func(rw http.ResponseWriter, r *http.Request) {
-					http.ServeFile(rw, r, file)
-				}).Name(routeName)
+				router.Path(routePath).Handler(customFileServer(Vfs, file)).Name(routeName)
 			} else {
 				dir := ConfigPath(fmt.Sprintf("%s.dir", routeConfigLocation))
-				//router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, http.FileServer(http.Dir(dir))))
-				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customFileServer(httpFS{http.Dir(dir)}, routeName, ""))).Name(routeName)
-				//router.PathPrefix(routePath).Handler(spaHandler{staticPath: http.Dir(dir), indexPath: "index.html"})
+				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customDirServer(Vfs, routeName, dir))).Name(routeName)
 			}
 		case "upload":
 			router.HandleFunc(routePath, uploadHandler).Name(routeName)
@@ -595,6 +617,9 @@ func setupRoutes(router *mux.Router) {
 			router.NewRoute().HeadersRegexp("Accept", "atom").Name(routeName).Path(routePath).HandlerFunc(atomHandler)
 			router.NewRoute().Name(routeName).Path(routePath).HandlerFunc(rssHandler) // I hate this
 		case "redirect":
+			router.HandleFunc(routePath, func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, routePath+"/", http.StatusMovedPermanently)
+			}).Name(routeName)
 		default:
 			router.HandleFunc(routePath, catchallHandler).Name(routeName)
 		}

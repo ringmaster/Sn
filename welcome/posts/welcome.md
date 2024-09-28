@@ -1,7 +1,7 @@
 ---
 title: Welcome
 slug: welcome
-date: 2022-11-12
+date: 2024-09-28
 categories: [welcome]
 authors: 
     - owen
@@ -12,7 +12,7 @@ home3: [1,2,3]
 home4: 14.072844
 ---
 
-Welcome to Sn!  Sn is intended to be a lightweight blog/website engine.  You should only need to run the Sn binary (or `go run sn.go` from source) to have a fully-functioning site with some of these characteristics:
+Welcome to Sn!!!  Sn is intended to be a lightweight blog/website engine.  You should only need to run the Sn binary (or `go run sn.go` from source) to have a fully-functioning site with some of these characteristics:
 
 * Automatic LetsEncrypt support for TLS
 * In-memory searchable database of a "repo" of posts and pages

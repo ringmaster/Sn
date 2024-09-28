@@ -21,7 +21,6 @@ import (
 	"github.com/araddon/dateparse"
 	"github.com/arpitgogia/rake"
 	attributes "github.com/mdigger/goldmark-attributes"
-	"github.com/radovskyb/watcher"
 	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 	"github.com/yuin/goldmark"
@@ -125,7 +124,7 @@ func DBConnect() {
 	}
 
 	if viper.IsSet("cleandb") && viper.GetBool("cleandb") {
-		os.Remove(dbfile)
+		Vfs.Remove(dbfile)
 	}
 
 	var err error
@@ -156,11 +155,11 @@ func DBLoadReposSync() {
 	for repoName := range viper.GetStringMap("repos") {
 		repoPath := ConfigPath(fmt.Sprintf("repos.%s.path", repoName))
 
-		if !DirExists(repoPath) {
+		if exists, err := afero.DirExists(Vfs, repoPath); err != nil || !exists {
 			panic(fmt.Sprintf("Repo path %s does not exist", repoPath))
 		}
 
-		errz := filepath.Walk(repoPath, func(path string, info os.FileInfo, _ error) error {
+		errz := afero.Walk(Vfs, repoPath, func(path string, info os.FileInfo, _ error) error {
 			if info.IsDir() {
 				return nil
 			}
@@ -257,7 +256,7 @@ func DBLoadRepo(repoName string) {
 		panic(err)
 	}
 	close(itempaths)
-	startWatching(repoPath, repoName)
+	StartWatching(repoPath, repoName)
 }
 
 func reloadItem(repoName string, repoPath string, filename string) (Item, error) {
@@ -283,9 +282,10 @@ func loadItem(repoName string, repoPath string, filename string) (Item, error) {
 
 	item.Source = filename
 
-	file, err := os.ReadFile(filename)
+	file, err := afero.ReadFile(Vfs, filename)
 	if err != nil {
-		panic(err)
+		slog.Error(fmt.Sprintf("Error reading file %s: %v", filename, err))
+		return item, err
 	}
 
 	var buf bytes.Buffer
@@ -414,7 +414,7 @@ func loadItem(repoName string, repoPath string, filename string) (Item, error) {
 	if _, ok := f["date"]; ok {
 		item.RawDate = f["date"].(string)
 	} else {
-		filestat, _ := os.Stat(filename)
+		filestat, _ := Vfs.Stat(filename)
 		item.RawDate = filestat.ModTime().String()
 	}
 	item.Date, _ = dateparse.ParseLocal(item.RawDate)
@@ -541,33 +541,73 @@ func insertFrontmatter(item Item) {
 	}
 }
 
-func startWatching(path string, repoName string) {
-	w := watcher.New()
-	w.SetMaxEvents(1)
-	w.FilterOps(watcher.Create, watcher.Write)
-	r := regexp.MustCompile(".md$")
-	w.AddFilterHook(watcher.RegexFilterHook(r, false))
+// FileState represents the state of a file
+type FileState struct {
+	Path    string
+	ModTime time.Time
+}
 
-	go func() {
-		for {
-			select {
-			case event := <-w.Event:
-				reloadItem(repoName, path, event.Path)
-			case err := <-w.Error:
-				log.Fatalln(err)
-			case <-w.Closed:
-				return
+// GetFileStates returns the current state of the files in the given directory
+func GetFileStates(fs afero.Fs, dir string, filter *regexp.Regexp) (map[string]FileState, error) {
+	fileStates := make(map[string]FileState)
+	err := afero.Walk(fs, dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && filter.MatchString(path) {
+			fileStates[path] = FileState{
+				Path:    path,
+				ModTime: info.ModTime(),
 			}
 		}
-	}()
+		return nil
+	})
+	return fileStates, err
+}
 
-	if err := w.AddRecursive(path); err != nil {
+// CompareFileStates compares the current state with the previous state and returns the changed files
+func CompareFileStates(prev, curr map[string]FileState) []string {
+	changedFiles := []string{}
+
+	// Check for new or modified files
+	for path, currState := range curr {
+		if prevState, exists := prev[path]; !exists || !prevState.ModTime.Equal(currState.ModTime) {
+			changedFiles = append(changedFiles, path)
+		}
+	}
+
+	// Check for deleted files
+	for path := range prev {
+		if _, exists := curr[path]; !exists {
+			changedFiles = append(changedFiles, path)
+		}
+	}
+
+	return changedFiles
+}
+
+// StartWatching starts watching the given directory for changes
+func StartWatching(path string, repoName string) {
+	r := regexp.MustCompile(".md$")
+	prevStates, err := GetFileStates(Vfs, path, r)
+	if err != nil {
 		log.Fatalln(err)
 	}
 
+	ticker := time.NewTicker(1 * time.Second)
+
 	go func() {
-		if err := w.Start(time.Millisecond * 100); err != nil {
-			log.Fatalln(err)
+		for range ticker.C {
+			currStates, err := GetFileStates(Vfs, path, r)
+			if err != nil {
+				log.Fatalln(err)
+			}
+			changedFiles := CompareFileStates(prevStates, currStates)
+			for _, file := range changedFiles {
+				slog.Info(fmt.Sprintf("File changed: %s", file))
+				reloadItem(repoName, path, file)
+			}
+			prevStates = currStates
 		}
 	}()
 }

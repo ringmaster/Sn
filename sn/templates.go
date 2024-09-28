@@ -3,7 +3,6 @@ package sn
 import (
 	"fmt"
 	"log/slog"
-	"os"
 	"path"
 	"regexp"
 	"strings"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/aymerick/raymond"
+	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 )
 
@@ -26,7 +26,7 @@ func GetTemplateFilesFromConfig(configPath string) []string {
 func RenderTemplateFiles(filenames []string, context map[string]interface{}) (string, error) {
 	concat := ""
 	for _, filename := range filenames {
-		file, err := os.ReadFile(filename)
+		file, err := afero.ReadFile(Vfs, filename)
 		if err != nil {
 			return string(file), err
 		}
@@ -43,14 +43,14 @@ func RenderTemplateFiles(filenames []string, context map[string]interface{}) (st
 func RegisterPartials() {
 	slog.Info("Registering Template Partials")
 	templatepath := ConfigPath("template_dir", MustExist())
-	files, err := os.ReadDir(templatepath)
+	files, err := afero.ReadDir(Vfs, templatepath)
 	if err != nil {
 		panic(err)
 	}
 
 	for _, file := range files {
 		if !file.IsDir() {
-			template, err := os.ReadFile(path.Join(templatepath, file.Name()))
+			template, err := afero.ReadFile(Vfs, path.Join(templatepath, file.Name()))
 			if err != nil {
 				panic(err)
 			}

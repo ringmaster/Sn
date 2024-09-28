@@ -46,17 +46,6 @@ type FileSystem interface {
 	ReadDir(name string) ([]fs.DirEntry, error)
 }
 
-type httpFS struct {
-	http.Dir
-}
-
-func (fs httpFS) Open(name string) (fs.File, error) {
-	return fs.Dir.Open(name)
-}
-func (fs httpFS) ReadDir(name string) ([]fs.DirEntry, error) {
-	return fs.ReadDir(name)
-}
-
 var router *mux.Router
 
 type SpacesConfig struct {
@@ -66,6 +55,8 @@ type SpacesConfig struct {
 	SecretKey   string
 	Region      string
 }
+
+type ctxKey struct{}
 
 func gitHandler(w http.ResponseWriter, r *http.Request) {
 	routeName := mux.CurrentRoute(r).GetName()
@@ -632,7 +623,7 @@ func LogMiddleware(next http.Handler) http.Handler {
 		logger := slog.Default()
 		setRootUrl(r)
 
-		req := r.WithContext(context.WithValue(r.Context(), "logger", logger))
+		req := r.WithContext(context.WithValue(r.Context(), ctxKey{}, logger))
 
 		next.ServeHTTP(w, req)
 

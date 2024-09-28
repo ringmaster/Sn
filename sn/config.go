@@ -28,6 +28,8 @@ func ConfigSetup() (afero.Fs, error) {
 	viper.AutomaticEnv()
 
 	viper.SetDefault("use_ssl", true)
+	//viper.AddConfigPath("/")
+	viper.AddConfigPath("")
 
 	if snGitRepo := os.Getenv("SN_GIT_REPO"); snGitRepo != "" {
 		Vfs, err = CloneRepoToVFS(snGitRepo)
@@ -35,6 +37,11 @@ func ConfigSetup() (afero.Fs, error) {
 			slog.Error(fmt.Sprintf("Error while cloning git repo: %v", err))
 			return nil, err
 		}
+		var snConfigFile string
+		if snConfigFile = os.Getenv("SN_CONFIG"); snConfigFile == "" {
+			snConfigFile = "sn.yaml"
+		}
+		viper.SetConfigFile(snConfigFile)
 	} else if snConfigFile := os.Getenv("SN_CONFIG"); snConfigFile != "" {
 		snConfigFile, _ := filepath.Abs(snConfigFile)
 		slog.Info(fmt.Sprintf("Config file was specified in environment: %s", snConfigFile))
@@ -52,28 +59,37 @@ func ConfigSetup() (afero.Fs, error) {
 		Vfs = afero.NewBasePathFs(afero.NewOsFs(), currentDir)
 	}
 	// Set the virtual filesystem as the source for viper config
-	viper.AddConfigPath("/")
 	viper.SetFs(Vfs)
 
-	// Is there a valid config file in the virtual filesystem?
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			slog.Error("Could not find configuration file")
-		} else {
-			slog.Error(fmt.Sprintf("Error while loading configuration file %#q", err))
-		}
-	} else {
-		// Show the config file used in Viper
-		slog.Info(fmt.Sprintf("Using config file: %s", viper.ConfigFileUsed()))
+	files, err := afero.ReadDir(Vfs, "/")
+	if err != nil {
+		slog.Error(fmt.Sprintf("Failed to read root directory: %s", err))
+		return nil, err
+	}
+
+	for _, file := range files {
+		fmt.Println(file.Name())
 	}
 
 	viper.WatchConfig()
 	if err := viper.ReadInConfig(); err != nil {
+		// Output the files in the root of the virtual filesystem
+		files, err2 := afero.ReadDir(Vfs, "/")
+		if err2 != nil {
+			slog.Error(fmt.Sprintf("Failed to read root directory of virtual filesystem: %s", err))
+			return nil, err2
+		}
+
+		for _, file := range files {
+			slog.Info(file.Name())
+		}
+
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 			slog.Error("Could not find configuration file")
 		} else {
 			slog.Error(fmt.Sprintf("Error while loading configuration file %#q", err))
 		}
+		panic(err)
 	}
 	viper.SetDefault("path", filepath.Dir(viper.ConfigFileUsed()))
 

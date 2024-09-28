@@ -10,7 +10,7 @@ subtitle: Sn is Tin
 rooturl: 'http://localhost/'
 # port - The port on which the server runs
 port: 8080
-# path - The "root path" for all referenced files here, relative to this file or an absolute path
+# path - The "root path" for all referenced files here, relative to this file
 path: welcome
 # dbfile - The name of a database file or leave blank to use an in-memory database
 dbfile: 'file:sn?mode=memory&cache=shared'

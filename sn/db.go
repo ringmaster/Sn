@@ -22,6 +22,7 @@ import (
 	"github.com/arpitgogia/rake"
 	attributes "github.com/mdigger/goldmark-attributes"
 	"github.com/radovskyb/watcher"
+	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 	"github.com/yuin/goldmark"
 	emoji "github.com/yuin/goldmark-emoji"
@@ -238,11 +239,11 @@ func DBLoadRepo(repoName string) {
 		}(w, itempaths)
 	}
 
-	if !DirExists(repoPath) {
+	if !DirExistsFs(Vfs, repoPath) {
 		panic(fmt.Sprintf("Repo path %s does not exist", repoPath))
 	}
 
-	err := filepath.Walk(repoPath, func(path string, info os.FileInfo, err error) error {
+	err := afero.Walk(Vfs, repoPath, func(path string, info os.FileInfo, err error) error {
 		if info.IsDir() {
 			return nil
 		}

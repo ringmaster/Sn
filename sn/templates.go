@@ -2,6 +2,7 @@ package sn
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path"
 	"regexp"
@@ -40,6 +41,7 @@ func RenderTemplateFiles(filenames []string, context map[string]interface{}) (st
 }
 
 func RegisterPartials() {
+	slog.Info("Registering Template Partials")
 	templatepath := ConfigPath("template_dir", MustExist())
 	files, err := os.ReadDir(templatepath)
 	if err != nil {
@@ -59,6 +61,7 @@ func RegisterPartials() {
 }
 
 func RegisterTemplateHelpers() {
+	slog.Info("Registering Template Helpers")
 	var onchange interface{}
 	raymond.RegisterHelper("keys", func(obj map[string]interface{}) string {
 		result := ``

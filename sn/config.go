@@ -18,26 +18,53 @@ import (
 	"github.com/spf13/viper"
 )
 
-func ConfigSetup() {
-	if snGitRepo := os.Getenv("SN_GIT_REPO"); snGitRepo != "" {
-		// Assuming you have a function `CloneRepoToVFS` that clones the repo to a virtual filesystem
-		vfs, err := CloneRepoToVFS(snGitRepo)
-		if err != nil {
-			slog.Error(fmt.Sprintf("Error while cloning git repo: %v", err))
-			return
-		}
-		// Set the virtual filesystem as the source for viper config
-		viper.SetFs(vfs)
-	}
+var Vfs afero.Fs
+
+func ConfigSetup() (afero.Fs, error) {
+	var err error
 
 	viper.SetConfigName("sn")
-	viper.AddConfigPath(".")
 	viper.SetEnvPrefix("SN")
 	viper.AutomaticEnv()
+
 	viper.SetDefault("use_ssl", true)
-	if snConfigFile := os.Getenv("SN_CONFIG"); snConfigFile != "" {
+
+	if snGitRepo := os.Getenv("SN_GIT_REPO"); snGitRepo != "" {
+		Vfs, err = CloneRepoToVFS(snGitRepo)
+		if err != nil {
+			slog.Error(fmt.Sprintf("Error while cloning git repo: %v", err))
+			return nil, err
+		}
+	} else if snConfigFile := os.Getenv("SN_CONFIG"); snConfigFile != "" {
 		snConfigFile, _ := filepath.Abs(snConfigFile)
-		viper.SetConfigFile(snConfigFile)
+		slog.Info(fmt.Sprintf("Config file was specified in environment: %s", snConfigFile))
+		configFileDir := filepath.Dir(snConfigFile)
+		slog.Info(fmt.Sprintf("Rooting virtual file system here: %s", configFileDir))
+		Vfs = afero.NewBasePathFs(afero.NewOsFs(), configFileDir)
+		viper.SetConfigFile(filepath.Base(snConfigFile))
+	} else {
+		currentDir, err := os.Getwd()
+		if err != nil {
+			slog.Error(fmt.Sprintf("Error getting current directory: %v", err))
+			return nil, err
+		}
+		slog.Info(fmt.Sprintf("Rooting virtual file system here: %s", currentDir))
+		Vfs = afero.NewBasePathFs(afero.NewOsFs(), currentDir)
+	}
+	// Set the virtual filesystem as the source for viper config
+	viper.AddConfigPath("/")
+	viper.SetFs(Vfs)
+
+	// Is there a valid config file in the virtual filesystem?
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			slog.Error("Could not find configuration file")
+		} else {
+			slog.Error(fmt.Sprintf("Error while loading configuration file %#q", err))
+		}
+	} else {
+		// Show the config file used in Viper
+		slog.Info(fmt.Sprintf("Using config file: %s", viper.ConfigFileUsed()))
 	}
 
 	viper.WatchConfig()
@@ -49,9 +76,13 @@ func ConfigSetup() {
 		}
 	}
 	viper.SetDefault("path", filepath.Dir(viper.ConfigFileUsed()))
+
+	return Vfs, nil
 }
 
 func CloneRepoToVFS(snGitRepo string) (afero.Fs, error) {
+	slog.Info("Cloning repository to virtual filesystem")
+
 	// Create an in-memory filesystem
 	fs := afero.NewMemMapFs()
 
@@ -79,6 +110,19 @@ func CloneRepoToVFS(snGitRepo string) (afero.Fs, error) {
 		slog.Error(fmt.Sprintf("Failed to clone repository: %s", err))
 		return nil, err
 	}
+
+	// List files in the root of the in-memory filesystem
+	/*
+		files, err := afero.ReadDir(fs, "/")
+		if err != nil {
+			slog.Error(fmt.Sprintf("Failed to read root directory: %s", err))
+			return nil, err
+		}
+
+		for _, file := range files {
+			fmt.Println(file.Name())
+		}
+	*/
 
 	slog.Info("Repository cloned successfully to virtual filesystem")
 	return fs, nil
@@ -119,7 +163,8 @@ func OptionallyExist() ConfigPathOptionFn {
 	}
 }
 
-func ConfigPath(shortpath string, opts ...ConfigPathOptionFn) string {
+// ConfigPath returns the absolute path defined for a configuration key
+func ConfigPath(configKey string, opts ...ConfigPathOptionFn) string {
 	options := &ConfigPathOptions{
 		HasDefault: false,
 		Default:    "",
@@ -130,35 +175,40 @@ func ConfigPath(shortpath string, opts ...ConfigPathOptionFn) string {
 		applyOpt(options)
 	}
 
-	if !viper.IsSet(shortpath) {
+	if !viper.IsSet(configKey) {
 		if options.HasDefault {
 			return options.Default
 		} else {
-			panic(fmt.Sprintf("Required config value for %s is not set in settings yaml", shortpath))
+			panic(fmt.Sprintf("Required config value for %s is not set in settings yaml", configKey))
 		}
 	}
 
-	longpath := viper.GetString(shortpath)
+	longpath := viper.GetString(configKey)
 
+	// Allow any values from the config to replace named variables in the path obtained from the config
 	configVars := viper.AllSettings()
-
 	pathTemplate := template.Must(template.New("").Parse(longpath))
 	buf := bytes.Buffer{}
 	pathTemplate.Execute(&buf, configVars)
 	var renderedPathTemplate string = buf.String()
 
-	if path.IsAbs(renderedPathTemplate) && DirExists(renderedPathTemplate) {
+	if DirExistsFs(Vfs, renderedPathTemplate) {
 		return renderedPathTemplate
 	}
 
-	base, err := filepath.Abs(viper.GetString("path"))
-	if err != nil {
-		panic(fmt.Sprintf("There is no absolute path at %s", viper.GetString("path")))
-	}
+	base := viper.GetString("path")
 
 	base = path.Join(base, renderedPathTemplate)
-	if options.MustExist && !DirExists(base) {
+	if options.MustExist && !DirExistsFs(Vfs, base) {
 		panic(fmt.Sprintf("Configpath for %s does not exist at %s", renderedPathTemplate, base))
 	}
 	return base
+}
+
+func DirExistsFs(fs afero.Fs, path string) bool {
+	info, err := fs.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
 }

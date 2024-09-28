@@ -19,16 +19,20 @@ var CLI struct {
 }
 
 func serve() {
-	sn.ConfigSetup()
+	_, err := sn.ConfigSetup()
 
-	sn.RegisterTemplateHelpers()
-	sn.RegisterPartials()
+	if err == nil {
+		sn.RegisterTemplateHelpers()
+		sn.RegisterPartials()
 
-	sn.DBConnect()
-	defer sn.DBClose()
-	sn.DBLoadRepos()
+		sn.DBConnect()
+		defer sn.DBClose()
+		sn.DBLoadRepos()
 
-	sn.WebserverStart()
+		sn.WebserverStart()
+	} else {
+		slog.Error(fmt.Sprintf("Error while setting up config: %v", err))
+	}
 }
 
 func sql(query string) {

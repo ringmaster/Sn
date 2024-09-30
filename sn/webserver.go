@@ -29,7 +29,6 @@ import (
 	"github.com/go-git/go-git/v5"
 	gitHttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
-	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/go-http-utils/etag"
 	"github.com/gorilla/feeds"
 	"github.com/gorilla/handlers"
@@ -67,6 +66,7 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 
 	// remote := ConfigStringDefault(fmt.Sprintf("%s.remote", routeConfigLocation), "origin")
 	var pullops *git.PullOptions
+	var mechanism string
 
 	gitUser := os.Getenv("SN_GIT_USERNAME")
 	keyFileConfig := fmt.Sprintf("%s.keyfile", routeConfigLocation)
@@ -78,6 +78,7 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 				Password: password,
 			},
 		}
+		mechanism = "basic auth"
 	} else if viper.IsSet(keyFileConfig) {
 		sshPath, err := filepath.Abs(ConfigPath(keyFileConfig))
 		if err != nil {
@@ -90,15 +91,18 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 		pullops = &git.PullOptions{
 			Auth: sshAuth,
 		}
+		mechanism = "ssh key"
 	} else {
 		slog.Error("Git webhook executed with no auth provided")
 		return
 	}
 
+	slog.Info("Webhook route - git pull", "route", routeName, "mechanism", mechanism)
+
 	var repo *git.Repository
 	billyFs := afero2billy.New(Vfs)
 
-	repo, err := git.Open(memory.NewStorage(), billyFs)
+	repo, err := git.Open(GitMemStorage, billyFs)
 	if err != nil {
 		slog.Error(fmt.Sprintf("Git Open: %#v\n", err))
 	}

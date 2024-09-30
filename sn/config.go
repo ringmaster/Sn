@@ -18,7 +18,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-var Vfs afero.Fs
+var (
+	Vfs           afero.Fs
+	GitMemStorage *memory.Storage
+)
 
 func ConfigSetup() (afero.Fs, error) {
 	var err error
@@ -121,8 +124,10 @@ func CloneRepoToVFS(snGitRepo string) (afero.Fs, error) {
 		}
 	}
 
+	GitMemStorage = memory.NewStorage()
+
 	// Clone the given repository to the in-memory filesystem
-	_, err := git.Clone(memory.NewStorage(), billyFs, cloneOptions)
+	_, err := git.Clone(GitMemStorage, billyFs, cloneOptions)
 	if err != nil {
 		slog.Error(fmt.Sprintf("Failed to clone repository: %s", err))
 		return nil, err

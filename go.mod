@@ -14,10 +14,8 @@ require (
 	github.com/gorilla/feeds v1.2.0
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
-	github.com/jonfriesen/go-billy-afero v0.0.0-20200115232419-1c09cee58fc2
 	github.com/mdigger/goldmark-attributes v0.0.0-20210529130523-52da21a6bf2b
 	github.com/olekukonko/tablewriter v0.0.5
-	github.com/radovskyb/watcher v1.0.7
 	github.com/spf13/afero v1.11.0
 	github.com/spf13/viper v1.18.2
 	github.com/yuin/goldmark v1.7.0
@@ -79,7 +77,6 @@ require (
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.19.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
-	gopkg.in/src-d/go-billy.v4 v4.3.2 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

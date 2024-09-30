@@ -110,7 +110,8 @@ func CloneRepoToVFS(snGitRepo string) (afero.Fs, error) {
 
 	// Set up clone options with or without authentication
 	cloneOptions := &git.CloneOptions{
-		URL: snGitRepo,
+		URL:    snGitRepo,
+		Mirror: true,
 	}
 
 	if username != "" && password != "" {

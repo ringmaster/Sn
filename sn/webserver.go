@@ -25,8 +25,11 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/c4milo/afero2billy"
 	"github.com/go-git/go-git/v5"
+	gitHttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/go-http-utils/etag"
 	"github.com/gorilla/feeds"
 	"github.com/gorilla/handlers"
@@ -62,38 +65,55 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 	routeName := mux.CurrentRoute(r).GetName()
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
 
-	path := ConfigPath(fmt.Sprintf("%s.dir", routeConfigLocation))
-	remote := ConfigStringDefault(fmt.Sprintf("%s.remote", routeConfigLocation), "origin")
+	// remote := ConfigStringDefault(fmt.Sprintf("%s.remote", routeConfigLocation), "origin")
+	var pullops *git.PullOptions
 
-	var sshAuth *ssh.PublicKeys
-	sshPath, err := filepath.Abs(ConfigPath(fmt.Sprintf("%s.keyfile", routeConfigLocation)))
-	if err != nil {
-		slog.Error(err.Error())
-	}
-	sshAuth, err = ssh.NewPublicKeysFromFile("git", sshPath, "")
-	if err != nil {
-		slog.Error(err.Error())
+	gitUser := os.Getenv("SN_GIT_USERNAME")
+	keyFileConfig := fmt.Sprintf("%s.keyfile", routeConfigLocation)
+	if gitUser != "" {
+		password := os.Getenv("SN_GIT_PASSWORD")
+		pullops = &git.PullOptions{
+			Auth: &gitHttp.BasicAuth{
+				Username: gitUser,
+				Password: password,
+			},
+		}
+	} else if viper.IsSet(keyFileConfig) {
+		sshPath, err := filepath.Abs(ConfigPath(keyFileConfig))
+		if err != nil {
+			slog.Error(err.Error(), "key config", routeConfigLocation)
+		}
+		sshAuth, err := ssh.NewPublicKeysFromFile("git", sshPath, "")
+		if err != nil {
+			slog.Error(err.Error(), "key from file", sshPath)
+		}
+		pullops = &git.PullOptions{
+			Auth: sshAuth,
+		}
+	} else {
+		slog.Error("Git webhook executed with no auth provided")
+		return
 	}
 
-	repo, err := git.PlainOpen(path)
+	var repo *git.Repository
+	billyFs := afero2billy.New(Vfs)
+
+	repo, err := git.Open(memory.NewStorage(), billyFs)
 	if err != nil {
-		slog.Error(fmt.Sprintf("Git PlainOpen (%s): %#v\n", path, err))
+		slog.Error(fmt.Sprintf("Git Open: %#v\n", err))
 	}
 	worktree, err := repo.Worktree()
 	if err != nil {
 		slog.Error(fmt.Sprintf("Git Worktree: %#v\n", err))
 	}
-	err = worktree.Pull(&git.PullOptions{
-		RemoteName: remote,
-		Auth:       sshAuth,
-	})
+	err = worktree.Pull(pullops)
 	if err != nil {
 		slog.Error(fmt.Sprintf("Git PullOptions: %#v\n", err))
 	}
 
 	ref, _ := repo.Head()
 	commit, _ := repo.CommitObject(ref.Hash())
-	slog.Info("commit", "commit_text", commit, "commit_hash", ref.Hash(), "commit_path", path)
+	slog.Info("commit", "commit_text", commit, "commit_hash", ref.Hash())
 
 	w.Header().Add("Content-Type", "text/plain")
 	w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")

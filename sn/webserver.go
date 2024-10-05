@@ -543,8 +543,21 @@ func customDirServer(fs afero.Fs, routeName string, prefix string) http.Handler 
 		filePath := filepath.Join(prefix, path.Clean(upath))
 		file, err := fs.Open(filePath)
 		if os.IsNotExist(err) {
-			w.WriteHeader(http.StatusNotFound)
-			http.Error(w, fmt.Sprintf("404: %s Cannot find %#v", routeName, filePath), http.StatusNotFound)
+			indexFilePath := filepath.Join(prefix, "index.html")
+			indexFile, indexErr := fs.Open(indexFilePath)
+			if indexErr != nil {
+				w.WriteHeader(http.StatusNotFound)
+				http.Error(w, fmt.Sprintf("404.1: %s Cannot find %#v", routeName, filePath), http.StatusNotFound)
+				return
+			}
+			defer indexFile.Close()
+
+			indexContent, indexErr := io.ReadAll(indexFile)
+			if indexErr != nil {
+				http.Error(w, "Error reading index file", http.StatusInternalServerError)
+				return
+			}
+			http.ServeContent(w, r, "index.html", time.Now(), bytes.NewReader(indexContent))
 			return
 		}
 		defer file.Close()
@@ -552,7 +565,7 @@ func customDirServer(fs afero.Fs, routeName string, prefix string) http.Handler 
 		stat, err := file.Stat()
 		if err != nil {
 			fmt.Fprintf(w, "404: %s Cannot find %#v", routeName, filePath)
-			http.Error(w, fmt.Sprintf("404: %s Cannot find %#v", routeName, filePath), http.StatusNotFound)
+			http.Error(w, fmt.Sprintf("404.2: %s Cannot find %#v", routeName, filePath), http.StatusNotFound)
 			return
 		}
 
@@ -569,7 +582,7 @@ func customDirServer(fs afero.Fs, routeName string, prefix string) http.Handler 
 			for _, entry := range entries {
 				name := entry.Name()
 				link := filepath.Join(r.URL.Path, name)
-				buf.WriteString(fmt.Sprintf("<li><a href=\"%s\">%s</a></li>", link, name))
+				buf.WriteString(fmt.Sprintf("<li><a href=\"./%s\">%s</a></li>", link, name))
 			}
 			buf.WriteString("</ul></body></html>")
 

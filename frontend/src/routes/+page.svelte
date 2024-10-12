@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { dataStore, fetchData } from '../store';
 
 	let count = 0;
@@ -10,12 +9,6 @@
 	let username = '';
 	let password = '';
 	let message = '';
-	let loggedIn = false;
-
-	// Fetch data when the component is mounted
-	onMount(() => {
-		fetchData();
-	});
 
 	async function login(event: Event) {
 		event.preventDefault();

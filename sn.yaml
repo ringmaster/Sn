@@ -24,6 +24,11 @@ repos:
   posts:
     # path - The directory inside of the root path that will be scanned for files for this repo
     path: posts
+webauthn:
+  rp_display_name: Sn
+  rp_id: localhost
+  rp_origins:
+    - http://localhost
 # routes - A list of URL routes for this site, requests are checked against the paths in alphabetical order by name, first matched wins
 routes:
   01_index:
@@ -90,6 +95,10 @@ routes:
   98_frontend:
     path: /_/frontend
     handler: frontend
+  98_frontenddev:
+    path: /_/devend
+    handler: static
+    dir: sn/frontend
   99_debug:
     path: /_/debug
     handler: debug

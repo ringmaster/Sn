@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -33,6 +34,7 @@ import (
 	"github.com/gorilla/feeds"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
+	"github.com/gorilla/sessions"
 	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/acme/autocert"
@@ -59,6 +61,8 @@ type SpacesConfig struct {
 }
 
 type ctxKey struct{}
+
+var store = sessions.NewCookieStore([]byte(`os.Getenv("SESSION_KEY")`))
 
 func gitHandler(w http.ResponseWriter, r *http.Request) {
 	routeName := mux.CurrentRoute(r).GetName()
@@ -473,6 +477,122 @@ func templateHandler(w http.ResponseWriter, r *http.Request, routeName string) {
 	w.Write([]byte(rendered))
 }
 
+func BasicAuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, _ := store.Get(r, "session")
+		username, password, ok := r.BasicAuth()
+
+		if ok {
+			// Validate the username and password
+			expectedUsername := os.Getenv("BASIC_AUTH_USERNAME")
+			expectedPassword := os.Getenv("BASIC_AUTH_PASSWORD")
+
+			if username != expectedUsername || password != expectedPassword {
+				// The username and password are incorrect, so return unauthorized
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+
+			// The username and password are correct, so set the session as authenticated
+			session.Values["authenticated"] = true
+			session.Values["username"] = username
+			slog.Info("Basic Auth Logged In", "username", username)
+			err := session.Save(r, w)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if session.Values["authenticated"] == true {
+			// If the session is authenticated, serve the request
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	})
+}
+
+func dataHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	session, _ := store.Get(r, "session")
+	// Check if the user is authenticated
+	if session.Values["authenticated"] != true {
+		// Supply an abbreviated response to the frontend
+		response := map[string]interface{}{
+			"loggedIn": false,
+			"username": nil,
+			"repos":    []string{},
+			"title":    viper.GetString("title"),
+		}
+
+		json.NewEncoder(w).Encode(response)
+		//http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	username := session.Values["username"].(string)
+	repos := viper.GetStringMap("repos")
+
+	response := map[string]interface{}{
+		"loggedIn": true,
+		"username": username,
+		"repos":    repos,
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, "session")
+	if session.Values["authenticated"] != true {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	} else {
+		username := session.Values["username"].(string)
+		response := map[string]interface{}{
+			"loggedIn": true,
+			"username": username,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+func logoutHandler(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, "session")
+	session.Values["authenticated"] = false
+	session.Values["username"] = ""
+	session.Save(r, w)
+	response := map[string]interface{}{
+		"loggedIn": false,
+		"username": nil,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func repoRestGetHandler(w http.ResponseWriter, r *http.Request) {
+	// Implement your GET handler logic here
+	w.Write([]byte("GET handler not implemented"))
+}
+
+func repoRestPostHandler(w http.ResponseWriter, r *http.Request) {
+	// Implement your POST handler logic here
+	w.Write([]byte("POST handler not implemented"))
+}
+
+func repoRestPutHandler(w http.ResponseWriter, r *http.Request) {
+	// Implement your PUT handler logic here
+	w.Write([]byte("PUT handler not implemented"))
+}
+
+func repoRestDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	// Implement your DELETE handler logic here
+	w.Write([]byte("DELETE handler not implemented"))
+}
+
 func postHandler(w http.ResponseWriter, r *http.Request) {
 	routeName := mux.CurrentRoute(r).GetName()
 	templateHandler(w, r, routeName)
@@ -542,7 +662,19 @@ func customDirServer(fs afero.Fs, routeName string, prefix string) http.Handler 
 
 		filePath := filepath.Join(prefix, path.Clean(upath))
 		file, err := fs.Open(filePath)
+		var doNotFound = false
+		var stat os.FileInfo
+		// If the file doesn't exist, try to serve the index.html file
 		if os.IsNotExist(err) {
+			doNotFound = true
+		} else {
+			stat, err = file.Stat()
+			if err != nil || stat.IsDir() {
+				doNotFound = true
+			}
+		}
+
+		if doNotFound {
 			indexFilePath := filepath.Join(prefix, "index.html")
 			indexFile, indexErr := fs.Open(indexFilePath)
 			if indexErr != nil {
@@ -561,35 +693,6 @@ func customDirServer(fs afero.Fs, routeName string, prefix string) http.Handler 
 			return
 		}
 		defer file.Close()
-
-		stat, err := file.Stat()
-		if err != nil {
-			fmt.Fprintf(w, "404: %s Cannot find %#v", routeName, filePath)
-			http.Error(w, fmt.Sprintf("404.2: %s Cannot find %#v", routeName, filePath), http.StatusNotFound)
-			return
-		}
-
-		if stat.IsDir() {
-			fmt.Printf("Directory: %s\n", filePath)
-			entries, err := afero.ReadDir(fs, filePath)
-			if err != nil {
-				http.Error(w, "Error reading directory", http.StatusInternalServerError)
-				return
-			}
-
-			var buf bytes.Buffer
-			buf.WriteString("<html><body><ul>")
-			for _, entry := range entries {
-				name := entry.Name()
-				link := filepath.Join(r.URL.Path, name)
-				buf.WriteString(fmt.Sprintf("<li><a href=\"./%s\">%s</a></li>", link, name))
-			}
-			buf.WriteString("</ul></body></html>")
-
-			w.Header().Set("Content-Type", "text/html")
-			w.Write(buf.Bytes())
-			return
-		}
 
 		content, err := io.ReadAll(file)
 		if err != nil {
@@ -624,7 +727,17 @@ func setupRoutes(router *mux.Router) {
 		case "posts":
 			router.HandleFunc(routePath, postHandler).Name(routeName)
 		case "frontend":
-			router.PathPrefix(routePath).Handler(http.StripPrefix(routePath+"/", customDirServer(afero.FromIOFS{FS: frontend}, routeName, "frontend"))).Name(routeName)
+			// This path is outside of auth middleware because it needs to supply basic API data to the frontend
+			router.Path(path.Join(routePath, "api")).Methods("GET").HandlerFunc(dataHandler).Name(routeName + "_api")
+			apiroutes := router.Path(path.Join(routePath, "api")).Subrouter()
+			apiroutes.Use(BasicAuthMiddleware)
+			apiroutes.Methods("POST").HandlerFunc(loginHandler).Name(routeName + "_api")
+			apiroutes.Methods("DELETE").HandlerFunc(logoutHandler).Name(routeName + "_api")
+			reporest := apiroutes.Path("/repo/{slug:.+}").Subrouter()
+			reporest.Methods("GET").HandlerFunc(repoRestGetHandler).Name(routeName + "_reporest_get")
+			reporest.Methods("POST").HandlerFunc(repoRestPostHandler).Name(routeName + "_reporest_post")
+			reporest.Methods("PUT").HandlerFunc(repoRestPutHandler).Name(routeName + "_reporest_put")
+			reporest.Methods("DELETE").HandlerFunc(repoRestDeleteHandler).Name(routeName + "_reporest_delete")
 			router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customDirServer(afero.FromIOFS{FS: frontend}, routeName, "frontend"))).Name(routeName + "_dir")
 		case "static":
 			if viper.IsSet(fmt.Sprintf("%s.file", routeConfigLocation)) {
@@ -664,8 +777,14 @@ func LogMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, req)
 
+		session, _ := store.Get(r, "session")
+		username := ""
+		if session.Values["authenticated"] == true {
+			username = session.Values["username"].(string)
+		}
+
 		logger.Info("web request", "request_duration", fmt.Sprintf("%dms", time.Since(start).Milliseconds()),
-			"route", mux.CurrentRoute(r).GetName(), "path", r.URL.Path)
+			"route", mux.CurrentRoute(r).GetName(), "path", r.URL.Path, "username", username)
 	})
 }
 

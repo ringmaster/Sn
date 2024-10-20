@@ -1,0 +1,188 @@
+<div
+  x-data="{title: '', slug: '', isOpen: false, customSlug: false,
+generateSlug(title) {
+  return this.slugify(`${new Date().toISOString().slice(0, 10)}-${title}`);
+},
+slugify(title) {
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s\d\-]+/g, '')
+    .replace(/\W+/g, '-')
+    .replace(/-+$/, '');
+},
+updateSlug() {
+  if (!this.customSlug) {
+    this.slug = this.generateSlug(this.title);
+  }
+},
+resetSlug() {
+  this.slug = this.generateSlug(this.title);
+  this.customSlug = false;
+},
+}"
+  class="flex-container"
+  x-init="$watch('title', () => updateSlug())"
+>
+  <section class="flex-content">
+    <div class="field has-addons is-fullwidth">
+      <div class="control is-expanded">
+        <input
+          class="input"
+          type="text"
+          placeholder="Enter title"
+          id="postTitle"
+          x-model="title"
+        />
+      </div>
+      <div class="control">
+        <button class="button is-info">
+          <span class="icon">
+            <i class="fas fa-search"></i>
+          </span>
+        </button>
+      </div>
+    </div>
+
+    <div class="field flex-content">
+      <div class="control flex-content">
+        <textarea
+          class="textarea"
+          placeholder="Enter content"
+          id="postContent"
+        ></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <div
+        class="card-content"
+        x-show="isOpen"
+        x-data="{slugify: (title) => title.toLowerCase().replace(/[^\w\s\d]+/g, '').replace(/\W+/g, '-')}"
+      >
+        <div class="content">
+          <div class="field">
+            <label class="label">Slug</label>
+          </div>
+          <div class="field has-addons is-fullwidth">
+            <div class="control is-expanded">
+              <input
+                class="input"
+                type="text"
+                placeholder="Enter slug"
+                id="postSlug"
+                x-model="slug"
+                @input="customSlug = true"
+              />
+            </div>
+            <div class="control">
+              <button class="button is-secondary" @click="resetSlug">
+                <span class="icon">
+                  <i class="fa-solid fa-arrow-rotate-left"></i>
+                </span>
+              </button>
+            </div>
+          </div>
+          <p class="help"><b>Slug Formula:</b> YYYY-mm-dd-slug</p>
+
+          <div class="field">
+            <label class="label">Repository</label>
+            <div class="control">
+              <div class="select is-fullwidth" x-data="$store.api.data">
+                <select id="postRepo" name="repo">
+                  <!--option value="" disabled selected>Select a repository</option-->
+                  <template x-for="(repo, repoName) in repos" :key="repoName">
+                    <option x-text="repoName" :value="repoName"></option>
+                  </template>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="label">Tags</label>
+            <div class="control">
+              <input
+                class="input"
+                type="text"
+                placeholder="Enter tags"
+                id="postTags"
+              />
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="label">Date</label>
+            <div class="field has-addons">
+              <div class="control is-expanded">
+                <input
+                  class="input"
+                  type="text"
+                  placeholder="Select a date"
+                  id="postDate"
+                  x-model="date"
+                />
+              </div>
+              <div class="control">
+                <button class="button is-secondary" @click="showDatePicker = true">
+                  <span class="icon">
+                    <i class="fas fa-calendar-alt"></i>
+                  </span>
+                </button>
+              </div>
+            </div>
+            <div x-show="showDatePicker" @click.away="showDatePicker = false">
+              <input type="date" x-model="date" @change="showDatePicker = false" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="label">Hero</label>
+            <div class="field has-addons">
+              <div class="control is-expanded">
+                <input
+                  class="input"
+                  type="text"
+                  placeholder="Enter a Hero Image URL"
+                  id="postHero"
+                />
+              </div>
+              <div class="control">
+                <button class="button is-secondary">
+                  <span class="icon">
+                    <i class="fas fa-upload"></i>
+                  </span>
+                </button>
+              </div>
+              <div class="control">
+                <button class="button is-tertiary">
+                  <span class="icon">
+                    <i class="fas fa-trash"></i>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-content">
+        <div class="field is-grouped is-grouped-right">
+          <div class="control">
+            <button class="button is-secondary" @click="isOpen = !isOpen">
+              Options
+            </button>
+          </div>
+          <div class="control">
+            <button class="button is-primary" x-on:click="submitPost">
+              Submit
+            </button>
+          </div>
+          <!-- Add more buttons here if needed -->
+        </div>
+      </div>
+    </div>
+  </section>
+</div>

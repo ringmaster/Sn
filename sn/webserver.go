@@ -579,8 +579,46 @@ func repoRestGetHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func repoRestPostHandler(w http.ResponseWriter, r *http.Request) {
-	// Implement your POST handler logic here
-	w.Write([]byte("POST handler not implemented"))
+	var payload struct {
+		Title     string `json:"title"`
+		TitleSlug string `json:"titleSlug"`
+		Content   string `json:"content"`
+		Repo      string `json:"repo"`
+		Tags      string `json:"tags"`
+		Hero      string `json:"hero"`
+		Date      string `json:"date"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, `{"error": "Invalid request payload"}`, http.StatusBadRequest)
+		return
+	}
+
+	repoPath := ConfigPath(fmt.Sprintf("repos.%s.path", payload.Repo))
+
+	if exists, err := afero.DirExists(Vfs, repoPath); err != nil || !exists {
+		http.Error(w, `{"error": "Repository not found"}`, http.StatusNotFound)
+		return
+	}
+
+	if payload.Date == "" {
+		payload.Date = time.Now().Format("2006-01-02 15:04:05")
+	}
+
+	session, _ := store.Get(r, "session")
+	username := session.Values["username"].(string)
+
+	markdownContent := fmt.Sprintf("---\ntitle: %s\nslug: %s\ndate: %s\ntags: %s\nhero: %s\nauthors:\n  - %s\n---\n\n%s", payload.Title, payload.TitleSlug, payload.Date, payload.Tags, payload.Hero, username, payload.Content)
+	markdownFilePath := filepath.Join(repoPath, payload.TitleSlug+".md")
+
+	if err := afero.WriteFile(Vfs, markdownFilePath, []byte(markdownContent), 0644); err != nil {
+		http.Error(w, `{"error": "Failed to write markdown file"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	w.Write([]byte(`{"message": "Markdown file created successfully"}`))
 }
 
 func repoRestPutHandler(w http.ResponseWriter, r *http.Request) {
@@ -669,30 +707,42 @@ func customDirServer(fs afero.Fs, routeName string, prefix string) http.Handler 
 			doNotFound = true
 		} else {
 			stat, err = file.Stat()
-			if err != nil || stat.IsDir() {
+			if err != nil {
 				doNotFound = true
+			} else if stat.IsDir() {
+				doNotFound = true
+				filePath = filePath + "/"
 			}
 		}
 
 		if doNotFound {
-			indexFilePath := filepath.Join(prefix, "index.html")
-			indexFile, indexErr := fs.Open(indexFilePath)
-			if indexErr != nil {
-				w.WriteHeader(http.StatusNotFound)
-				http.Error(w, fmt.Sprintf("404.1: %s Cannot find %#v", routeName, filePath), http.StatusNotFound)
-				return
+			// Try to find an index.html file in progressive directories from prefix up to filePath
+			dirPath := filePath
+			for {
+				dirPath = filepath.Dir(dirPath)
+				fmt.Printf("dirPath: %s\n", dirPath)
+				if dirPath == "." || dirPath == "/" {
+					break
+				}
+				indexFilePath := filepath.Join(dirPath, "index.html")
+				indexFile, indexErr := fs.Open(indexFilePath)
+				if indexErr == nil {
+					defer indexFile.Close()
+					indexContent, indexErr := io.ReadAll(indexFile)
+					if indexErr != nil {
+						http.Error(w, "Error reading index file", http.StatusInternalServerError)
+						return
+					}
+					http.ServeContent(w, r, "index.html", time.Now(), bytes.NewReader(indexContent))
+					return
+				}
 			}
-			defer indexFile.Close()
-
-			indexContent, indexErr := io.ReadAll(indexFile)
-			if indexErr != nil {
-				http.Error(w, "Error reading index file", http.StatusInternalServerError)
-				return
-			}
-			http.ServeContent(w, r, "index.html", time.Now(), bytes.NewReader(indexContent))
+			w.WriteHeader(http.StatusNotFound)
+			http.Error(w, fmt.Sprintf("404.1: %s Cannot find an index.html between %#v and %#v", routeName, filePath, prefix), http.StatusNotFound)
 			return
 		}
 		defer file.Close()
+		fmt.Printf("file found: %#v\n", stat)
 
 		content, err := io.ReadAll(file)
 		if err != nil {
@@ -729,15 +779,15 @@ func setupRoutes(router *mux.Router) {
 		case "frontend":
 			// This path is outside of auth middleware because it needs to supply basic API data to the frontend
 			router.Path(path.Join(routePath, "api")).Methods("GET").HandlerFunc(dataHandler).Name(routeName + "_api")
-			apiroutes := router.Path(path.Join(routePath, "api")).Subrouter()
+			apiroutes := router.PathPrefix(path.Join(routePath, "api")).Subrouter()
 			apiroutes.Use(BasicAuthMiddleware)
-			apiroutes.Methods("POST").HandlerFunc(loginHandler).Name(routeName + "_api")
-			apiroutes.Methods("DELETE").HandlerFunc(logoutHandler).Name(routeName + "_api")
-			reporest := apiroutes.Path("/repo/{slug:.+}").Subrouter()
-			reporest.Methods("GET").HandlerFunc(repoRestGetHandler).Name(routeName + "_reporest_get")
-			reporest.Methods("POST").HandlerFunc(repoRestPostHandler).Name(routeName + "_reporest_post")
-			reporest.Methods("PUT").HandlerFunc(repoRestPutHandler).Name(routeName + "_reporest_put")
-			reporest.Methods("DELETE").HandlerFunc(repoRestDeleteHandler).Name(routeName + "_reporest_delete")
+			reporest := apiroutes.PathPrefix("/repo").Subrouter()
+			reporest.Path("/{repo:.+}/{slug:.+}").Methods("GET").HandlerFunc(repoRestGetHandler).Name(routeName + "_reporest_get")
+			reporest.Path("/{repo:.+}/{slug:.+}").Methods("POST").HandlerFunc(repoRestPostHandler).Name(routeName + "_reporest_post")
+			reporest.Path("/{repo:.+}/{slug:.+}").Methods("PUT").HandlerFunc(repoRestPutHandler).Name(routeName + "_reporest_put")
+			reporest.Path("/{repo:.+}/{slug:.+}").Methods("DELETE").HandlerFunc(repoRestDeleteHandler).Name(routeName + "_reporest_delete")
+			apiroutes.Methods("POST").HandlerFunc(loginHandler).Name("000" + routeName + "_apilogin")
+			apiroutes.Methods("DELETE").HandlerFunc(logoutHandler).Name("000" + routeName + "_apidelete")
 			router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customDirServer(afero.FromIOFS{FS: frontend}, routeName, "frontend"))).Name(routeName + "_dir")
 		case "static":
 			if viper.IsSet(fmt.Sprintf("%s.file", routeConfigLocation)) {

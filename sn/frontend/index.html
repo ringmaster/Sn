@@ -1,37 +1,181 @@
-<!doctype html>
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" href="./favicon.png" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		
-		<link rel="modulepreload" href="./_app/immutable/entry/start.ClFIId_y.js">
-		<link rel="modulepreload" href="./_app/immutable/chunks/entry.DEimTN0L.js">
-		<link rel="modulepreload" href="./_app/immutable/chunks/runtime.Do8c63dZ.js">
-		<link rel="modulepreload" href="./_app/immutable/chunks/index.BrrP9P3a.js">
-		<link rel="modulepreload" href="./_app/immutable/entry/app.CjCvcdqR.js">
-		<link rel="modulepreload" href="./_app/immutable/chunks/render.jsJNfXpn.js">
-		<link rel="modulepreload" href="./_app/immutable/chunks/disclose-version.CJGUqitJ.js">
-		<link rel="modulepreload" href="./_app/immutable/chunks/if.DAzU6LWl.js">
-	</head>
-	<body data-sveltekit-preload-data="hover">
-		<div style="display: contents">
-			<script>
-				{
-					__sveltekit_147drh1 = {
-						base: new URL(".", location).pathname.slice(0, -1)
-					};
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sn Admin UI</title>
 
-					const element = document.currentScript.parentElement;
+    <!-- Bulma -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bulma@1.0.2/css/bulma.min.css"
+    />
+    <!--link
+      rel="stylesheet"
+      href="https://jenil.github.io/bulmaswatch/superhero/bulmaswatch.min.css"
+    /-->
 
-					Promise.all([
-						import("./_app/immutable/entry/start.ClFIId_y.js"),
-						import("./_app/immutable/entry/app.CjCvcdqR.js")
-					]).then(([kit, app]) => {
-						kit.start(app, element);
-					});
-				}
-			</script>
-		</div>
-	</body>
+    <!-- Alpine.js -->
+    <script src="https://cdn.jsdelivr.net/npm/pinecone-router@4.x.x/dist/router.min.js"></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+      defer
+    ></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="styles.css" />
+
+    <script>
+      window.addEventListener("alpine:init", () => {
+        window.PineconeRouter.settings.hash = false;
+        window.PineconeRouter.settings.basePath = "/__/frontend";
+        window.PineconeRouter.settings.interceptLinks = true;
+        window.PineconeRouter.settings.templateTargetId = "app";
+
+        // When the page loads, load the blog data from the api endpoint
+        Alpine.store("api", {
+          data: { loaded: false, loggedIn: false, username: "", title: "", repos: [] },
+          navMenu: false,
+          init() {
+            this.refresh();
+          },
+          async refresh() {
+            try {
+              const response = await fetch("/_/frontend/api");
+              this.data = await response.json();
+            } catch (error) {
+              console.error("Error loading data:", error);
+            }
+          },
+        });
+
+        Alpine.effect(() => {
+          if (
+            Alpine.store("api").data.loaded &&
+            !Alpine.store("api").data.loggedIn
+          ) {
+            window.PineconeRouter.context.navigate("/login");
+          }
+        });
+      });
+
+      function login(e) {
+        const username = document.querySelector('input[type="text"]').value;
+        const password = document.querySelector('input[type="password"]').value;
+
+        const credentials = btoa(`${username}:${password}`);
+        fetch("/_/frontend/api", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${credentials}`,
+          },
+        })
+          .then((response) => {
+            if (response.ok) {
+              Alpine.store("api").refresh();
+              window.PineconeRouter.context.navigate("/compose");
+            } else {
+              alert("Login failed");
+            }
+          })
+          .catch((error) => {
+            console.error("Error:", error);
+          });
+      }
+
+      function logout() {
+        fetch("/_/frontend/api", {
+          method: "DELETE",
+        })
+          .then((response) => {
+            if (response.ok) {
+              Alpine.store("api").refresh();
+              Alpine.store("api").navMenu = false;
+              window.PineconeRouter.context.navigate("/login");
+            } else {
+              alert("Logout failed");
+            }
+          })
+          .catch((error) => {
+            console.error("Error:", error);
+          });
+      }
+
+      function submitPost() {
+        const title = document.getElementById('postTitle').value;
+        const content = document.getElementById('postContent').value;
+        const tags = document.getElementById('postTags').value;
+        const repo = document.getElementById('postRepo').value;
+
+        const titleSlug = title.toLowerCase().replace(/[^\w\s\d]+/g, "").replace(/\W+/g, "-");
+
+        fetch(`/_/frontend/api/repo/${repo}/${titleSlug}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ title, titleSlug, content, tags, repo }),
+        })
+          .then((response) => {
+            if (response.ok) {
+              window.PineconeRouter.context.navigate("/");
+            } else {
+              alert("Submit failed");
+            }
+          })
+          .catch((error) => {
+            console.error("Error:", error);
+          });
+      }
+    </script>
+  </head>
+  <body x-data>
+    <nav class="navbar is-fixed-top" role="navigation" aria-label="main navigation">
+      <div class="navbar-brand">
+        <a class="navbar-item" href="/"> Sn </a>
+
+        <a
+          role="button"
+          class="navbar-burger"
+          aria-label="menu"
+          aria-expanded="false"
+          data-target="navbarBasicExample"
+          :class="{'is-active': $store.api.navMenu}"
+          @click.capture="$store.api.navMenu = ! $store.api.navMenu"
+          @click.outside="$store.api.navMenu = false"
+        >
+          <span aria-hidden="true"></span>
+          <span aria-hidden="true"></span>
+          <span aria-hidden="true"></span>
+          <span aria-hidden="true"></span>
+        </a>
+      </div>
+
+      <div
+        id="navbarBasicExample"
+        class="navbar-menu"
+        :class="{'is-active': $store.api.navMenu}"
+      >
+        <div class="navbar-start">
+          <div class="navbar-dropdown">
+            <div x-show="$store.api.data.loggedIn">
+              <a class="navbar-item" href="/compose"> Compose </a>
+              <a class="navbar-item" href="/posts"> Posts </a>
+              <hr class="navbar-divider" />
+              <a class="navbar-item" @click="logout()"> Log Out </a>
+            </div>
+            <div x-show="! $store.api.data.loggedIn">
+              <a class="navbar-item" href="/login"> Login </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+    <template x-route="/login" x-template="login.html"></template>
+    <template x-route="/compose" x-template="compose.html"></template>
+    <div class="container" id="app">
+
+    </div>
+  </body>
 </html>

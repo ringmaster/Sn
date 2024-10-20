@@ -96,9 +96,9 @@ routes:
     path: /_/frontend
     handler: frontend
   98_frontenddev:
-    path: /_/devend
     handler: static
-    dir: sn/frontend
+    path: /__/frontend
+    dir: frontend
   99_debug:
     path: /_/debug
     handler: debug

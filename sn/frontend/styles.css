@@ -1,0 +1,51 @@
+/*
+html .label:not(:last-child) {
+    margin-left: 1em;
+    font-size: smaller;
+    font-weight: normal;
+    margin-bottom: -1em;
+    z-index: 100;
+    position: relative;
+    background-color: #fff;
+}
+
+.label + .control {
+    margin-top: 1em;
+}
+*/
+
+:root {
+    --bulma-radius: 0;
+    --bulma-shadow: none;
+}
+
+:root .card {
+    --bulma-card-radius: 0;
+    --bulma-card-header-shadow: none;
+}
+
+.flex-container {
+    display: flex;
+    flex-direction: column;
+    height: 90vh;
+}
+
+.flex-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+#postContent {
+    flex: 1;
+    resize: none;
+    /* Optional: prevents manual resizing */
+}
+
+.textarea {
+    --bulma-textarea-max-height: 100%;
+}
+
+body {
+    padding-top: 3.25rem;
+}

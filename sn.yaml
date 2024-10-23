@@ -24,6 +24,10 @@ repos:
   posts:
     # path - The directory inside of the root path that will be scanned for files for this repo
     path: posts
+# users - A list of users for authentication
+users:
+    test:
+        passwordhash: $2a$10$X7szeKDWNVDNNTIvg5/uRuIY0ETKkWeDbG/Pk7VfJxa9RnNlg9ki2
 webauthn:
   rp_display_name: Sn
   rp_id: localhost

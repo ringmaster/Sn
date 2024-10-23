@@ -80,7 +80,7 @@
               Alpine.store("api").refresh();
               window.PineconeRouter.context.navigate("/compose");
             } else {
-              alert("Login failed");
+              bulmaToast.toast({ message: 'Login failed', type: 'is-danger' });
             }
           })
           .catch((error) => {

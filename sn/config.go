@@ -65,14 +65,10 @@ func ConfigSetup() (afero.Fs, error) {
 	// Set the virtual filesystem as the source for viper config
 	viper.SetFs(Vfs)
 
-	files, err := afero.ReadDir(Vfs, "/")
+	_, err = afero.ReadDir(Vfs, "/")
 	if err != nil {
 		slog.Error(fmt.Sprintf("Failed to read root directory: %s", err))
 		return nil, err
-	}
-
-	for _, file := range files {
-		fmt.Println(file.Name())
 	}
 
 	viper.WatchConfig()

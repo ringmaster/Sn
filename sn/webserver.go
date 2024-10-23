@@ -484,12 +484,16 @@ func BasicAuthMiddleware(next http.Handler) http.Handler {
 		username, password, ok := r.BasicAuth()
 
 		if ok {
-			// Validate the username and password
-			expectedUsername := os.Getenv("BASIC_AUTH_USERNAME")
-			expectedPassword := os.Getenv("BASIC_AUTH_PASSWORD")
+			// Validate the username
+			users := viper.GetStringMap("users")
+			user, exists := users[username]
+			if !exists {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
 
-			if username != expectedUsername || password != expectedPassword {
-				// The username and password are incorrect, so return unauthorized
+			passwordHash := user.(map[string]interface{})["passwordhash"].(string)
+			if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}

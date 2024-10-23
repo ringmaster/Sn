@@ -4,11 +4,15 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"syscall"
 
 	"github.com/alecthomas/kong"
 	"github.com/joho/godotenv"
 	"github.com/olekukonko/tablewriter"
 	"github.com/ringmaster/Sn/sn"
+	"github.com/spf13/viper"
+	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 var CLI struct {
@@ -17,6 +21,10 @@ var CLI struct {
 	Sql struct {
 		Query string `arg:"" required:"" help:"The query to execute"`
 	} `cmd:"sql" help:"Perform queries against repo data"`
+	Passwd struct {
+		Username string `arg:"" required:"" help:"The user"`
+		Password string `arg:"" optional:"" help:"The password to set"`
+	} `cmd:"passwd" help:"Create or update a user password"`
 }
 
 func serve() {
@@ -65,6 +73,41 @@ func sql(query string) {
 
 }
 
+func passwd(username string, passwords ...string) {
+	var password string
+	if len(passwords) == 0 {
+		fmt.Printf("Please enter password for user %s: ", username)
+		bytePassword, err := terminal.ReadPassword(int(syscall.Stdin))
+		if err != nil {
+			slog.Error(fmt.Sprintf("Error reading password: %v", err))
+			return
+		}
+		password = string(bytePassword)
+		fmt.Println()
+	}
+	if password == "" {
+		slog.Error("No password provided")
+		return
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		slog.Error(fmt.Sprintf("Error hashing password: %v", err))
+		return
+	}
+
+	_, err = sn.ConfigSetup()
+	if err != nil {
+		slog.Error(fmt.Sprintf("Error loading config: %v", err))
+		return
+	}
+
+	viper.Set("users."+username+".passwordhash", string(hashedPassword))
+	viper.WriteConfig()
+
+	slog.Info(fmt.Sprintf("Password for user %s has been set successfully", username))
+}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
@@ -80,6 +123,12 @@ func main() {
 			Summary: true,
 		}))
 	switch ctx.Command() {
+	case "passwd <username> <password>":
+		slog.Default().Info("setting password")
+		passwd(CLI.Passwd.Username, CLI.Passwd.Password)
+	case "passwd <username>":
+		slog.Default().Info("started Sn serve")
+		passwd(CLI.Passwd.Username)
 	case "serve":
 		slog.Default().Info("started Sn serve")
 		serve()

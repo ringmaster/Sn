@@ -2,11 +2,9 @@ name: Go Cross-Compilation Build
 
 on:
   push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+    tags:
+      - "v*.*.*"  # Only trigger on version tag pushes
+  workflow_dispatch:  # Allows you to manually trigger the workflow
 
 jobs:
   build:
@@ -39,3 +37,26 @@ jobs:
       with:
         name: sn-${{ matrix.goos }}-${{ matrix.goarch }}
         path: build/${{ matrix.goos }}_${{ matrix.goarch }}/sn
+
+    - name: Create GitHub Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: Release ${{ github.ref_name }}
+        body: |
+          ## Release Notes
+          This is the official release of version ${{ github.ref_name }}.
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Automatically provided by GitHub Actions
+
+    - name: Upload release assets
+      uses: actions/upload-release-asset@v1
+      for: [build/${{ matrix.goos }}_${{ matrix.goarch }}/sn*]
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: build/${{ matrix.goos }}_${{ matrix.goarch }}/sn
+        asset_name: sn-${{ matrix.goos }}-${{ matrix.goarch }}
+        asset_content_type: application/octet-stream

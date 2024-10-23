@@ -20,12 +20,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go
       with:
-        go-version: '1.20' # or the version of Go you're using
+        go-version: '1.23' # or the version of Go you're using
 
     - name: Build for ${{ matrix.goos }}/${{ matrix.goarch }}
       run: |
@@ -35,7 +35,7 @@ jobs:
         CGO_ENABLED: 0  # Disable CGO for portability across platforms
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact
       with:
         name: myapp-${{ matrix.goos }}-${{ matrix.goarch }}
         path: build/${{ matrix.goos }}_${{ matrix.goarch }}/sn

@@ -22,13 +22,17 @@
       defer
     ></script>
 
+    <!--Bulma Toast-->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bulma-toast/2.4.4/bulma-toast.min.js" integrity="sha512-Mblf9e5nxLeT5MxzmcT1L3Esj3sBqKxAXgq+SQUf0/eaJTBvx2RXA+VP3Qjpg2zDAYSSc/j6n1Gf6oU0CW2tqw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+    <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="{{BASE_PATH}}/styles.css" />
 
     <script>
       window.addEventListener("alpine:init", () => {
         window.PineconeRouter.settings.hash = false;
-        window.PineconeRouter.settings.basePath = "/__/frontend";
+        window.PineconeRouter.settings.basePath = "{{BASE_PATH}}";
         window.PineconeRouter.settings.interceptLinks = true;
         window.PineconeRouter.settings.templateTargetId = "app";
 
@@ -101,33 +105,6 @@
             console.error("Error:", error);
           });
       }
-
-      function submitPost() {
-        const title = document.getElementById('postTitle').value;
-        const content = document.getElementById('postContent').value;
-        const tags = document.getElementById('postTags').value;
-        const repo = document.getElementById('postRepo').value;
-
-        const titleSlug = title.toLowerCase().replace(/[^\w\s\d]+/g, "").replace(/\W+/g, "-");
-
-        fetch(`/_/frontend/api/repo/${repo}/${titleSlug}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ title, titleSlug, content, tags, repo }),
-        })
-          .then((response) => {
-            if (response.ok) {
-              window.PineconeRouter.context.navigate("/");
-            } else {
-              alert("Submit failed");
-            }
-          })
-          .catch((error) => {
-            console.error("Error:", error);
-          });
-      }
     </script>
   </head>
   <body x-data>
@@ -162,10 +139,12 @@
             <div x-show="$store.api.data.loggedIn">
               <a class="navbar-item" href="/compose"> Compose </a>
               <a class="navbar-item" href="/posts"> Posts </a>
+              <a class="navbar-item" href="/" native> Home </a>
               <hr class="navbar-divider" />
               <a class="navbar-item" @click="logout()"> Log Out </a>
             </div>
             <div x-show="! $store.api.data.loggedIn">
+              <a class="navbar-item" href="/" native> Home </a>
               <a class="navbar-item" href="/login"> Login </a>
             </div>
           </div>

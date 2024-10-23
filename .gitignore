@@ -27,3 +27,4 @@ private.pem
 public.pem
 test/schema.sql
 sn/Sn
+.env

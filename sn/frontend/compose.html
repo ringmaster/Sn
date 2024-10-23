@@ -1,5 +1,5 @@
 <div
-  x-data="{title: '', slug: '', isOpen: false, customSlug: false,
+  x-data="{title: '', slug: '', repo: '', tags: '', content: '', isOpen: false, customSlug: false, images: [], date: '', showDatePicker: false, showModal: false, hero: '',
 generateSlug(title) {
   return this.slugify(`${new Date().toISOString().slice(0, 10)}-${title}`);
 },
@@ -20,9 +20,58 @@ resetSlug() {
   this.slug = this.generateSlug(this.title);
   this.customSlug = false;
 },
+selectUnsplashImage() {
+  const query = $refs.imgKeyword.value;
+  if (!query) {
+    return;
+  }
+  fetch(`https://api.unsplash.com/search/photos?query=${query}&client_id={{UNSPLASH}}`)
+    .then(response => response.json())
+    .then(data => {
+      this.images = data.results;
+    });
+},
+showDatePicker() {
+  this.showDatePicker = true;
+},
+submitPost() {
+  const postContent = {
+    title: this.title,
+    slug: this.slug,
+    content: this.content,
+    tags: this.tags,
+    repo: document.getElementById('postRepo').value,
+    hero: this.hero,
+  };
+
+  if (this.title == '' || this.content == '' || this.repo == '') {
+    bulmaToast.toast({ message: 'Please fill in all required fields', type: 'is-warning' });
+    return;
+  }
+ 
+  fetch(`/_/frontend/api/repo/${postContent.repo}/${postContent.slug}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(postContent),
+  })
+    .then((response) => {
+      if (response.ok) {
+        bulmaToast.toast({ message: 'Post submitted', type: 'is-success' });
+      } else {
+        bulmaToast.toast({ message: 'Submission failed', type: 'is-error' });
+      }
+    })
+    .catch((error) => {
+      bulmaToast.toast({ message: 'There was an error submitting the post', type: 'is-error' });
+      console.error('Error:', error);
+    });
+},
+
 }"
   class="flex-container"
-  x-init="$watch('title', () => updateSlug())"
+  x-init="$watch('title', () => updateSlug());$store.api.navMenu = false"
 >
   <section class="flex-content">
     <div class="field has-addons is-fullwidth">
@@ -36,7 +85,7 @@ resetSlug() {
         />
       </div>
       <div class="control">
-        <button class="button is-info">
+        <button class="button is-info" tabindex="-1">
           <span class="icon">
             <i class="fas fa-search"></i>
           </span>
@@ -50,6 +99,7 @@ resetSlug() {
           class="textarea"
           placeholder="Enter content"
           id="postContent"
+          x-model="content"
         ></textarea>
       </div>
     </div>
@@ -88,10 +138,20 @@ resetSlug() {
           <div class="field">
             <label class="label">Repository</label>
             <div class="control">
-              <div class="select is-fullwidth" x-data="$store.api.data">
-                <select id="postRepo" name="repo">
+              <div class="select is-fullwidth">
+                <select
+                  id="postRepo"
+                  name="repo"
+                  x-model="repo"
+                  x-init="repo = $store.api.data.repos[0]"
+                  x-ref="repo"
+                >
                   <!--option value="" disabled selected>Select a repository</option-->
-                  <template x-for="(repo, repoName) in repos" :key="repoName">
+                  <template
+                    x-data="$store.api.data"
+                    x-for="(repo, repoName) in repos"
+                    :key="repoName"
+                  >
                     <option x-text="repoName" :value="repoName"></option>
                   </template>
                 </select>
@@ -107,6 +167,7 @@ resetSlug() {
                 type="text"
                 placeholder="Enter tags"
                 id="postTags"
+                x-model="tags"
               />
             </div>
           </div>
@@ -124,7 +185,10 @@ resetSlug() {
                 />
               </div>
               <div class="control">
-                <button class="button is-secondary" @click="showDatePicker = true">
+                <button
+                  class="button is-secondary"
+                  @click="showDatePicker = true"
+                >
                   <span class="icon">
                     <i class="fas fa-calendar-alt"></i>
                   </span>
@@ -132,7 +196,11 @@ resetSlug() {
               </div>
             </div>
             <div x-show="showDatePicker" @click.away="showDatePicker = false">
-              <input type="date" x-model="date" @change="showDatePicker = false" />
+              <input
+                type="date"
+                x-model="date"
+                @change="showDatePicker = false"
+              />
             </div>
           </div>
 
@@ -145,6 +213,7 @@ resetSlug() {
                   type="text"
                   placeholder="Enter a Hero Image URL"
                   id="postHero"
+                  x-model="hero"
                 />
               </div>
               <div class="control">
@@ -155,9 +224,9 @@ resetSlug() {
                 </button>
               </div>
               <div class="control">
-                <button class="button is-tertiary">
+                <button class="button is-tertiary" @click="showModal = true">
                   <span class="icon">
-                    <i class="fas fa-trash"></i>
+                    <i class="fa-brands fa-unsplash"></i>
                   </span>
                 </button>
               </div>
@@ -185,4 +254,50 @@ resetSlug() {
       </div>
     </div>
   </section>
+
+  <div x-show="showModal" class="modal is-active">
+    <div class="modal-background" @click="showModal = false"></div>
+    <div class="modal-content box">
+      <div class="field">
+        <label class="label">Hero</label>
+        <div class="field has-addons">
+          <div class="control is-expanded">
+            <input
+              class="input"
+              type="text"
+              placeholder="Enter a keyword"
+              id="imgKeyword"
+              x-ref="imgKeyword"
+            />
+          </div>
+          <div class="control">
+            <button class="button is-primary" @click="selectUnsplashImage">
+              <span class="icon">
+                <i class="fas fa-search"></i>
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="columns is-multiline">
+        <template x-for="image in images" :key="image.id">
+          <div class="column is-one-quarter">
+            <figure class="image is-4by3">
+              <img
+                :src="image.urls.thumb"
+                @click="() => { hero = image.urls.regular; showModal = false; }"
+                alt="Unsplash Image"
+              />
+            </figure>
+          </div>
+        </template>
+      </div>
+    </div>
+    <button
+      class="modal-close is-large"
+      aria-label="close"
+      @click="showModal = false"
+    ></button>
+  </div>
 </div>

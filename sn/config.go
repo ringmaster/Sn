@@ -21,6 +21,7 @@ import (
 var (
 	Vfs           afero.Fs
 	GitMemStorage *memory.Storage
+	Repo          *git.Repository
 )
 
 func ConfigSetup() (afero.Fs, error) {
@@ -118,16 +119,20 @@ func CloneRepoToVFS(snGitRepo string) (afero.Fs, error) {
 	}
 
 	if username != "" && password != "" {
+		slog.Info("Using basic authentication for git clone", "username", username)
 		cloneOptions.Auth = &http.BasicAuth{
 			Username: username, // can be anything except an empty string
 			Password: password,
 		}
+	} else {
+		slog.Info("Basic authentication for git clone is not set - write potentially disabled")
 	}
 
 	GitMemStorage = memory.NewStorage()
 
 	// Clone the given repository to the in-memory filesystem
-	_, err := git.Clone(GitMemStorage, billyFs, cloneOptions)
+	var err error
+	Repo, err = git.Clone(GitMemStorage, billyFs, cloneOptions)
 	if err != nil {
 		slog.Error(fmt.Sprintf("Failed to clone repository: %s", err))
 		return nil, err

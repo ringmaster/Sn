@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/alecthomas/kong"
+	"github.com/joho/godotenv"
 	"github.com/olekukonko/tablewriter"
 	"github.com/ringmaster/Sn/sn"
 )
@@ -65,6 +66,10 @@ func sql(query string) {
 }
 
 func main() {
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Printf("Error loading .env file")
+	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	ctx := kong.Parse(
 		&CLI,

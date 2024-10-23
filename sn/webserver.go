@@ -28,6 +28,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/c4milo/afero2billy"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	gitHttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/go-http-utils/etag"
@@ -580,17 +581,22 @@ func repoRestGetHandler(w http.ResponseWriter, r *http.Request) {
 
 func repoRestPostHandler(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
-		Title     string `json:"title"`
-		TitleSlug string `json:"titleSlug"`
-		Content   string `json:"content"`
-		Repo      string `json:"repo"`
-		Tags      string `json:"tags"`
-		Hero      string `json:"hero"`
-		Date      string `json:"date"`
+		Title   string `json:"title"`
+		Slug    string `json:"slug"`
+		Content string `json:"content"`
+		Repo    string `json:"repo"`
+		Tags    string `json:"tags"`
+		Hero    string `json:"hero"`
+		Date    string `json:"date"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, `{"error": "Invalid request payload"}`, http.StatusBadRequest)
+		return
+	}
+
+	if payload.Title == "" || payload.Slug == "" || payload.Content == "" || payload.Repo == "" {
+		http.Error(w, `{"error": "Missing required fields"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -608,17 +614,73 @@ func repoRestPostHandler(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "session")
 	username := session.Values["username"].(string)
 
-	markdownContent := fmt.Sprintf("---\ntitle: %s\nslug: %s\ndate: %s\ntags: %s\nhero: %s\nauthors:\n  - %s\n---\n\n%s", payload.Title, payload.TitleSlug, payload.Date, payload.Tags, payload.Hero, username, payload.Content)
-	markdownFilePath := filepath.Join(repoPath, payload.TitleSlug+".md")
+	markdownContent := fmt.Sprintf("---\ntitle: %s\nslug: %s\ndate: %s\ntags: %s\nhero: %s\nauthors:\n  - %s\n---\n\n%s", payload.Title, payload.Slug, payload.Date, payload.Tags, payload.Hero, username, payload.Content)
+	markdownFilePath := filepath.Join(repoPath, payload.Slug+".md")
 
 	if err := afero.WriteFile(Vfs, markdownFilePath, []byte(markdownContent), 0644); err != nil {
 		http.Error(w, `{"error": "Failed to write markdown file"}`, http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(`{"message": "Markdown file created successfully"}`))
+	if snGitRepo := os.Getenv("SN_GIT_REPO"); snGitRepo != "" {
+		// Retrieve username and password from environment variables
+		gitusername := os.Getenv("SN_GIT_USERNAME")
+		gitpassword := os.Getenv("SN_GIT_PASSWORD")
+
+		// Get the Worktree
+		worktree, err := Repo.Worktree()
+		if err != nil {
+			slog.Error("Failed to get worktree", slog.String("error", err.Error()))
+			http.Error(w, `{"error": "Failed to get worktree"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Stage the file (add it to the index)
+		_, err = worktree.Add(markdownFilePath)
+		if err != nil {
+			slog.Error("Failed to add file to worktree", slog.String("filePath", markdownFilePath), slog.String("error", err.Error()))
+			http.Error(w, `{"error": "Failed to add file to index"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Commit the change
+		commitHash, err := worktree.Commit("Updated file content", &git.CommitOptions{
+			Author: &object.Signature{
+				Name:  username,
+				Email: "your-email@example.com",
+				When:  time.Now(),
+			},
+		})
+		if err != nil {
+			slog.Error("Failed to commit changes", slog.String("error", err.Error()))
+			http.Error(w, `{"error": "Failed to commit changes"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Log the commit hash
+		slog.Info("Commit successful", slog.String("commitHash", commitHash.String()))
+
+		// Push the changes to the remote repository
+		err = Repo.Push(&git.PushOptions{
+			Auth: &gitHttp.BasicAuth{
+				Username: gitusername,
+				Password: gitpassword,
+			},
+		})
+		if err != nil {
+			slog.Error("Failed to push changes", slog.String("error", err.Error()))
+			http.Error(w, `{"error": "Failed to push changes"}`, http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"message": "Markdown file created and pushed to remote repository successfully"}`))
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"message": "Markdown file created successfully"}`))
+	}
 }
 
 func repoRestPutHandler(w http.ResponseWriter, r *http.Request) {
@@ -690,6 +752,12 @@ func customFileServer(fs afero.Fs, file string) http.Handler {
 	})
 }
 
+func replaceBasePath(content []byte, basePath string) []byte {
+	result := []byte(strings.ReplaceAll(string(content), "{{BASE_PATH}}", basePath))
+	result = []byte(strings.ReplaceAll(string(result), "{{UNSPLASH}}", viper.GetString("unsplash")))
+	return result
+}
+
 func customDirServer(fs afero.Fs, routeName string, prefix string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		slog.Info("serving file", "route", routeName, "path", r.URL.Path)
@@ -733,6 +801,7 @@ func customDirServer(fs afero.Fs, routeName string, prefix string) http.Handler 
 						http.Error(w, "Error reading index file", http.StatusInternalServerError)
 						return
 					}
+					indexContent = replaceBasePath(indexContent, viper.GetString(fmt.Sprintf("routes.%s.path", routeName)))
 					http.ServeContent(w, r, "index.html", time.Now(), bytes.NewReader(indexContent))
 					return
 				}
@@ -742,13 +811,13 @@ func customDirServer(fs afero.Fs, routeName string, prefix string) http.Handler 
 			return
 		}
 		defer file.Close()
-		fmt.Printf("file found: %#v\n", stat)
 
 		content, err := io.ReadAll(file)
 		if err != nil {
 			http.Error(w, "Error reading file", http.StatusInternalServerError)
 			return
 		}
+		content = replaceBasePath(content, viper.GetString(fmt.Sprintf("routes.%s.path", routeName)))
 		reader := bytes.NewReader(content)
 		http.ServeContent(w, r, stat.Name(), stat.ModTime(), reader)
 	})

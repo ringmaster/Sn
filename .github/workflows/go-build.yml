@@ -18,12 +18,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4.2.2
+      uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v5.0.2
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.23' # or the version of Go you're using
+        go-version: '1.23'  # Or the version of Go you're using
 
     - name: Build for ${{ matrix.goos }}/${{ matrix.goarch }}
       run: |
@@ -33,7 +33,7 @@ jobs:
         CGO_ENABLED: 0  # Disable CGO for portability across platforms
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v4.4.3
+      uses: actions/upload-artifact@v3
       with:
         name: sn-${{ matrix.goos }}-${{ matrix.goarch }}
         path: build/${{ matrix.goos }}_${{ matrix.goarch }}/sn
@@ -53,16 +53,9 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Automatically provided by GitHub Actions
 
     - name: Upload Release Assets
-      # You may pin to the exact commit or the version.
-      # uses: tanyagray/action-upload-release-asset@6f7cb885466e94be7b52b5b7f8d7974178d5c15d
-      uses: tanyagray/action-upload-release-asset@v1.1.3
-      for: [build/${{ matrix.goos }}_${{ matrix.goarch }}/sn*]
+      uses: actions/upload-release-asset@v1
       with:
-        # The URL for uploading assets to the release
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        # The path to the asset you want to upload
         asset_path: build/${{ matrix.goos }}_${{ matrix.goarch }}/sn
-        # The name of the asset you want to upload
         asset_name: sn-${{ matrix.goos }}-${{ matrix.goarch }}
-        # The content-type of the asset you want to upload. See the supported Media Types here: https://www.iana.org/assignments/media-types/media-types.xhtml for more information
         asset_content_type: application/octet-stream

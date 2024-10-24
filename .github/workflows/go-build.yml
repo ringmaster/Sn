@@ -28,6 +28,7 @@ jobs:
     - name: Build for ${{ matrix.goos }}/${{ matrix.goarch }}
       run: |
         mkdir -p build/${{ matrix.goos }}_${{ matrix.goarch }}
+        go mod tidy
         GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o build/${{ matrix.goos }}_${{ matrix.goarch }}/sn
       env:
         CGO_ENABLED: 0  # Disable CGO for portability across platforms

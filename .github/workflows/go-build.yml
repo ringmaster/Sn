@@ -11,6 +11,9 @@ jobs:
     name: Build Go binaries for multiple platforms
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+
     strategy:
       matrix:
         goos: [linux, windows, darwin]
@@ -60,3 +63,5 @@ jobs:
         asset_path: build/${{ matrix.goos }}_${{ matrix.goarch }}/sn
         asset_name: sn-${{ matrix.goos }}-${{ matrix.goarch }}
         asset_content_type: application/octet-stream
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Automatically provided by GitHub Actions

@@ -18,4 +18,4 @@ Welcome to Sn!!!  Sn is intended to be a lightweight blog/website engine.  You s
 * In-memory searchable database of a "repo" of posts and pages
 * Realtime markdown rendering of those posts and pages according to URL requests
 
-The text you are currently reading is part of a single markdown post that Sn is rendering.
+The text you are currently reading is part of a single markdown post that Sn is rendering.  You can [open the web editing UI to write a post.](/_/frontend)

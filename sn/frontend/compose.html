@@ -71,7 +71,7 @@ submitPost() {
 
 }"
   class="flex-container"
-  x-init="$watch('title', () => updateSlug());$store.api.navMenu = false"
+  x-init="$watch('title', () => updateSlug());$store.api.navMenu = false;const easyMDE = new EasyMDE({toolbar: false, uploadImage: true, element: document.getElementById('postContent')});"
 >
   <section class="flex-content">
     <div class="field has-addons is-fullwidth">

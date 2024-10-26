@@ -32,7 +32,7 @@ func ConfigSetup() (afero.Fs, error) {
 	viper.AutomaticEnv()
 
 	viper.SetDefault("use_ssl", true)
-	//viper.AddConfigPath("/")
+	viper.AddConfigPath("/")
 	viper.AddConfigPath("")
 
 	if snGitRepo := os.Getenv("SN_GIT_REPO"); snGitRepo != "" {

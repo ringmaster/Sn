@@ -5,6 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sn Admin UI</title>
 
+    <link rel="manifest" href="{{BASE_PATH}}/manifest.json" />
+    <!-- iOS specific settings for home screen apps -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="Sn Admin UI" />
+
+    <!-- Icons for iOS home screen (include various sizes) -->
+    <link rel="apple-touch-icon" href="{{BASE_PATH}}/icons/apple-touch-icon-180x180.png" />
+
+    <!-- Splash screen images for different screen sizes (optional but recommended) -->
+    <link
+      rel="apple-touch-startup-image"
+      href="{{BASE_PATH}}/splashscreens/splash-640x1136.png"
+      media="(device-width: 320px) and (device-height: 568px)"
+    />
+
     <!-- Bulma -->
     <link
       rel="stylesheet"
@@ -23,14 +42,25 @@
     ></script>
 
     <!--Bulma Toast-->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/bulma-toast/2.4.4/bulma-toast.min.js" integrity="sha512-Mblf9e5nxLeT5MxzmcT1L3Esj3sBqKxAXgq+SQUf0/eaJTBvx2RXA+VP3Qjpg2zDAYSSc/j6n1Gf6oU0CW2tqw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/bulma-toast/2.4.4/bulma-toast.min.js"
+      integrity="sha512-Mblf9e5nxLeT5MxzmcT1L3Esj3sBqKxAXgq+SQUf0/eaJTBvx2RXA+VP3Qjpg2zDAYSSc/j6n1Gf6oU0CW2tqw=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
 
     <!-- EasyMDE -->
-    <link rel="stylesheet" href="https://unpkg.com/psc-markdowneditor/dist/easymde.min.css">
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/psc-markdowneditor/dist/easymde.min.css"
+    />
     <script src="https://unpkg.com/psc-markdowneditor/dist/easymde.min.js"></script>
 
     <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"
+    />
     <link rel="stylesheet" href="{{BASE_PATH}}/styles.css" />
 
     <script>
@@ -42,7 +72,13 @@
 
         // When the page loads, load the blog data from the api endpoint
         Alpine.store("api", {
-          data: { loaded: false, loggedIn: false, username: "", title: "", repos: [] },
+          data: {
+            loaded: false,
+            loggedIn: false,
+            username: "",
+            title: "",
+            repos: [],
+          },
           navMenu: false,
           init() {
             this.refresh();
@@ -84,7 +120,7 @@
               Alpine.store("api").refresh();
               window.PineconeRouter.context.navigate("/compose");
             } else {
-              bulmaToast.toast({ message: 'Login failed', type: 'is-danger' });
+              bulmaToast.toast({ message: "Login failed", type: "is-danger" });
             }
           })
           .catch((error) => {
@@ -112,7 +148,11 @@
     </script>
   </head>
   <body x-data>
-    <nav class="navbar is-fixed-top" role="navigation" aria-label="main navigation">
+    <nav
+      class="navbar is-fixed-top"
+      role="navigation"
+      aria-label="main navigation"
+    >
       <div class="navbar-brand">
         <a class="navbar-item" href="/"> Sn </a>
 
@@ -157,8 +197,6 @@
     </nav>
     <template x-route="/login" x-template="login.html"></template>
     <template x-route="/compose" x-template="compose.html"></template>
-    <div class="container" id="app">
-
-    </div>
+    <div class="container" id="app"></div>
   </body>
 </html>

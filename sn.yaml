@@ -33,6 +33,8 @@ webauthn:
   rp_id: localhost
   rp_origins:
     - http://localhost
+# slug_pattern: The pattern used to generate slugs for posts, defaults to a pattern of: YYYY-mm-dd-title
+slug_pattern: YYYY-MM-DD-title
 # routes - A list of URL routes for this site, requests are checked against the paths in alphabetical order by name, first matched wins
 routes:
   01_index:
@@ -99,9 +101,6 @@ routes:
   98_frontend:
     path: /_/frontend
     handler: frontend
-  98_frontenddev:
-    handler: static
-    path: /__/frontend
     dir: frontend
   99_debug:
     path: /_/debug

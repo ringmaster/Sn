@@ -179,11 +179,15 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	uploadPasswordHash := viper.GetString(fmt.Sprintf("%s.passwordhash", routeConfigLocation))
 
-	// Check the password
-	password := r.FormValue("password")
-	if nil != bcrypt.CompareHashAndPassword([]byte(uploadPasswordHash), []byte(password)) {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	// Is the session authenticated?
+	session, _ := store.Get(r, "session")
+	if session.Values["authenticated"] != true {
+		// Check the password
+		password := r.FormValue("password")
+		if nil != bcrypt.CompareHashAndPassword([]byte(uploadPasswordHash), []byte(password)) {
+			http.Error(w, "Upload Unauthorized", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	file, header, err := r.FormFile("file")
@@ -538,13 +542,15 @@ func dataHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// User is authenticated, supply full response
 	username := session.Values["username"].(string)
 	repos := viper.GetStringMap("repos")
 
 	response := map[string]interface{}{
-		"loggedIn": true,
-		"username": username,
-		"repos":    repos,
+		"loggedIn":    true,
+		"username":    username,
+		"repos":       repos,
+		"slugPattern": viper.GetString("slug_pattern"),
 	}
 
 	json.NewEncoder(w).Encode(response)
@@ -859,9 +865,15 @@ func setupRoutes(router *mux.Router) {
 			reporest.Path("/{repo:.+}/{slug:.+}").Methods("POST").HandlerFunc(repoRestPostHandler).Name(routeName + "_reporest_post")
 			reporest.Path("/{repo:.+}/{slug:.+}").Methods("PUT").HandlerFunc(repoRestPutHandler).Name(routeName + "_reporest_put")
 			reporest.Path("/{repo:.+}/{slug:.+}").Methods("DELETE").HandlerFunc(repoRestDeleteHandler).Name(routeName + "_reporest_delete")
+			apiroutes.Path("/upload").Methods("POST").HandlerFunc(uploadHandler).Name(routeName + "_apiupload")
 			apiroutes.Methods("POST").HandlerFunc(loginHandler).Name("000" + routeName + "_apilogin")
 			apiroutes.Methods("DELETE").HandlerFunc(logoutHandler).Name("000" + routeName + "_apidelete")
-			router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customDirServer(afero.FromIOFS{FS: frontend}, routeName, "frontend"))).Name(routeName + "_dir")
+			if viper.IsSet(fmt.Sprintf("%s.dir", routeConfigLocation)) {
+				dir := ConfigPath(fmt.Sprintf("%s.dir", routeConfigLocation))
+				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customDirServer(Vfs, routeName, dir))).Name(routeName + "_dir_static")
+			} else {
+				router.PathPrefix(routePath).Handler(http.StripPrefix(routePath, customDirServer(afero.FromIOFS{FS: frontend}, routeName, "frontend"))).Name(routeName + "_dir")
+			}
 		case "static":
 			if viper.IsSet(fmt.Sprintf("%s.file", routeConfigLocation)) {
 				file := ConfigPath(fmt.Sprintf("%s.file", routeConfigLocation), OptionallyExist())

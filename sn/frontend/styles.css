@@ -49,3 +49,14 @@ html .label:not(:last-child) {
 body {
     padding-top: 3.25rem;
 }
+
+.EasyMDEContainer {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+}
+
+.CodeMirror {
+    flex: 1;
+    flex-direction: column;
+}

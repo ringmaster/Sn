@@ -130,7 +130,6 @@ submitPost() {
 init() {
   $watch('title', () => this.updateSlug());
   this.slugPattern = Alpine.store('api').data.slugPattern || this.slugPattern
-  $store.api.navMenu = false;
   const easyMDE = new EasyMDE({
     uploadImage: true, 
     element: document.getElementById('postContent'),

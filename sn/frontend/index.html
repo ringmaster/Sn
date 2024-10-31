@@ -15,7 +15,10 @@
     <meta name="apple-mobile-web-app-title" content="Sn Admin UI" />
 
     <!-- Icons for iOS home screen (include various sizes) -->
-    <link rel="apple-touch-icon" href="{{BASE_PATH}}/icons/apple-touch-icon-180x180.png" />
+    <link
+      rel="apple-touch-icon"
+      href="{{BASE_PATH}}/icons/apple-touch-icon-180x180.png"
+    />
 
     <!-- Splash screen images for different screen sizes (optional but recommended) -->
     <link
@@ -79,7 +82,6 @@
             title: "",
             repos: [],
           },
-          navMenu: false,
           init() {
             this.refresh();
           },
@@ -135,7 +137,6 @@
           .then((response) => {
             if (response.ok) {
               Alpine.store("api").refresh();
-              Alpine.store("api").navMenu = false;
               window.PineconeRouter.context.navigate("/login");
             } else {
               alert("Logout failed");
@@ -152,9 +153,16 @@
       class="navbar is-fixed-top"
       role="navigation"
       aria-label="main navigation"
+      x-data="{ navMenu: false }"
     >
       <div class="navbar-brand">
-        <a class="navbar-item" href="/"> Sn </a>
+        <a class="navbar-item" href="/" style="padding: 0px"
+          ><img
+            style="max-height: unset"
+            src="{{BASE_PATH}}/icons/apple-touch-icon-180x180.png"
+            width="52"
+            height="52"
+        /></a>
 
         <a
           role="button"
@@ -162,9 +170,9 @@
           aria-label="menu"
           aria-expanded="false"
           data-target="navbarBasicExample"
-          :class="{'is-active': $store.api.navMenu}"
-          @click.capture="$store.api.navMenu = ! $store.api.navMenu"
-          @click.outside="$store.api.navMenu = false"
+          :class="{'is-active': navMenu}"
+          @click.capture="navMenu = !navMenu"
+          @click.outside="navMenu = false"
         >
           <span aria-hidden="true"></span>
           <span aria-hidden="true"></span>
@@ -176,22 +184,16 @@
       <div
         id="navbarBasicExample"
         class="navbar-menu"
-        :class="{'is-active': $store.api.navMenu}"
+        :class="{'is-active': navMenu}"
       >
         <div class="navbar-start">
-          <div class="navbar-dropdown">
-            <div x-show="$store.api.data.loggedIn">
-              <a class="navbar-item" href="/compose"> Compose </a>
-              <a class="navbar-item" href="/posts"> Posts </a>
-              <a class="navbar-item" href="/" native> Home </a>
-              <hr class="navbar-divider" />
-              <a class="navbar-item" @click="logout()"> Log Out </a>
-            </div>
-            <div x-show="! $store.api.data.loggedIn">
-              <a class="navbar-item" href="/" native> Home </a>
-              <a class="navbar-item" href="/login"> Login </a>
-            </div>
-          </div>
+          <a x-show="$store.api.data.loggedIn" class="navbar-item" href="/compose"> Compose </a>
+          <a x-show="$store.api.data.loggedIn" class="navbar-item" href="/posts"> Posts </a>
+          <a x-show="$store.api.data.loggedIn" class="navbar-item" href="/" native> Home </a>
+          <hr class="navbar-divider" />
+          <a x-show="$store.api.data.loggedIn" class="navbar-item" @click="logout()"> Log Out </a>
+          <a x-show="! $store.api.data.loggedIn" class="navbar-item" href="/" native> Home </a>
+          <a x-show="! $store.api.data.loggedIn" class="navbar-item" href="/login"> Login </a>
         </div>
       </div>
     </nav>

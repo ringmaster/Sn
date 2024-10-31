@@ -16,12 +16,12 @@ html .label:not(:last-child) {
 
 :root {
     --bulma-radius: 0;
-    --bulma-shadow: none;
+    /* --bulma-shadow: none; */
 }
 
 :root .card {
     --bulma-card-radius: 0;
-    --bulma-card-header-shadow: none;
+    /* --bulma-card-header-shadow: none; */
 }
 
 .flex-container {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
@@ -29,6 +30,7 @@ func ConfigSetup() (afero.Fs, error) {
 
 	viper.SetConfigName("sn")
 	viper.SetEnvPrefix("SN")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "__"))
 	viper.AutomaticEnv()
 
 	viper.SetDefault("use_ssl", true)
@@ -92,6 +94,8 @@ func ConfigSetup() (afero.Fs, error) {
 		panic(err)
 	}
 	viper.SetDefault("path", filepath.Dir(viper.ConfigFileUsed()))
+
+	fmt.Printf("The passwordhash for the user test from the config is: %#q\n", viper.GetString("users.test.passwordhash"))
 
 	return Vfs, nil
 }

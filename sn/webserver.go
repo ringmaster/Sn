@@ -406,6 +406,18 @@ func feedHandler(r *http.Request) *feeds.Feed {
 	return feed
 }
 
+func routeStringValue(r *http.Request, v string) string {
+	routeParameters := mux.Vars(r)
+	for param, param_value := range r.URL.Query() {
+		routeParameters[fmt.Sprintf("params.%s", param)] = param_value[0]
+	}
+	temp := v
+	for k1, v1 := range routeParameters {
+		temp = strings.ReplaceAll(temp, fmt.Sprintf("{%s}", k1), v1)
+	}
+	return temp
+}
+
 func templateHandler(w http.ResponseWriter, r *http.Request, routeName string) {
 	routeConfigLocation := fmt.Sprintf("routes.%s", routeName)
 
@@ -426,19 +438,7 @@ func templateHandler(w http.ResponseWriter, r *http.Request, routeName string) {
 		outval := viper.Get(qlocation)
 		switch v := outval.(type) {
 		case bool, int, string:
-			routeParameters := mux.Vars(r)
-			for param, param_value := range r.URL.Query() {
-				routeParameters[fmt.Sprintf("params.%s", param)] = param_value[0]
-			}
-			temp := v
-			for k1, v1 := range routeParameters {
-				switch nv := temp.(type) {
-				case string:
-					temp = strings.ReplaceAll(nv, fmt.Sprintf("{%s}", k1), v1)
-				}
-			}
-
-			context[outVarName] = temp
+			context[outVarName] = routeStringValue(r, v.(string))
 		default:
 			outvals := maps.Clone(viper.GetStringMap(qlocation))
 			itemResult := ItemsFromOutvals(outvals, context)
@@ -493,12 +493,14 @@ func BasicAuthMiddleware(next http.Handler) http.Handler {
 			user, exists := users[username]
 			if !exists {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				slog.Info("Basic Auth User Not Found", "username", username)
 				return
 			}
 
 			passwordHash := user.(map[string]interface{})["passwordhash"].(string)
 			if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				slog.Info("Basic Auth Password Incorrect", "username", username)
 				return
 			}
 
@@ -509,6 +511,7 @@ func BasicAuthMiddleware(next http.Handler) http.Handler {
 			err := session.Save(r, w)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
+				slog.Error("Failed to save session", slog.String("error", err.Error()))
 				return
 			}
 		}
@@ -520,6 +523,7 @@ func BasicAuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		slog.Info("Basic Auth Unauthorized", "username", username)
 	})
 }
 
@@ -894,7 +898,9 @@ func setupRoutes(router *mux.Router) {
 			router.NewRoute().Name(routeName).Path(routePath).HandlerFunc(rssHandler) // I hate this
 		case "redirect":
 			router.HandleFunc(routePath, func(w http.ResponseWriter, r *http.Request) {
-				http.Redirect(w, r, routePath+"/", http.StatusMovedPermanently)
+				to := viper.GetString(fmt.Sprintf("%s.to", routeConfigLocation))
+				to = routeStringValue(r, to)
+				http.Redirect(w, r, to, http.StatusTemporaryRedirect)
 			}).Name(routeName)
 		default:
 			router.HandleFunc(routePath, catchallHandler).Name(routeName)

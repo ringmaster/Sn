@@ -109,11 +109,11 @@ func passwd(username string, passwords ...string) {
 }
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	err := godotenv.Load()
 	if err != nil {
-		fmt.Printf("Error loading .env file")
+		slog.Info("Not using .env file")
 	}
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	ctx := kong.Parse(
 		&CLI,
 		kong.Description("A simple web server that dynamically serves blog entries"),

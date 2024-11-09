@@ -838,11 +838,13 @@ func customDirServer(fs afero.Fs, routeName string, prefix string) http.Handler 
 }
 
 func setRootUrl(r *http.Request) {
-	protocol := "http"
-	if r.TLS != nil {
-		protocol = "https"
+	if !viper.IsSet("rooturl") {
+		protocol := "http"
+		if r.TLS != nil {
+			protocol = "https"
+		}
+		viper.SetDefault("rooturl", fmt.Sprintf("%s://%s/", protocol, r.Host))
 	}
-	viper.SetDefault("rooturl", fmt.Sprintf("%s://%s/", protocol, r.Host))
 }
 
 func setupRoutes(router *mux.Router) {

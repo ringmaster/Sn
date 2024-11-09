@@ -352,12 +352,25 @@ func loadItem(repoName string, repoPath string, filename string) (Item, error) {
 	item.Html, _ = replaceImgSrc(item.Html)
 
 	// Get Categories from frontmatter
-	var categories []string
+	categories := make([]string, 0)
 	if _, ok := f["categories"]; ok {
 		arr := f["categories"].([]interface{})
 		categories = make([]string, len(arr))
-		for i, v := range arr {
-			categories[i] = fmt.Sprint(v)
+		for _, v := range arr {
+			categories = append(categories, fmt.Sprint(v))
+		}
+	}
+
+	// Get Categories from frontmatter tags
+	if _, ok := f["tags"]; ok {
+		switch f["tags"].(type) {
+		case string:
+			categories = append(categories, f["tags"].(string))
+		case []interface{}:
+			for _, v := range f["tags"].([]interface{}) {
+				categories = append(categories, fmt.Sprint(v))
+			}
+		case nil:
 		}
 	}
 
@@ -659,6 +672,7 @@ func ItemsFromOutvals(outVariableParams map[string]interface{}, context map[stri
 	setQryValue(&qry.Slug, params, "slug")
 	setQryValue(&qry.Repo, params, "repo")
 	setQryValue(&qry.Category, params, "category")
+	setQryValue(&qry.Category, params, "tag")
 	setQryValue(&qry.Author, params, "author")
 	setQryValue(&qry.Search, params, "search")
 	setQryValue(&qry.OrderBy, params, "order_by")

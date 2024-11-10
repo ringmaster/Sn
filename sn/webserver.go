@@ -727,24 +727,60 @@ func fingerHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Permissions-Policy", "geolocation=(self), microphone=()")
 	w.WriteHeader(200)
 
-	rendered := `{  
-		"subject": "acct:ringmaster@asymptomatic.net",
+	resource := r.URL.Query().Get("resource")
+	if resource == "" {
+		http.Error(w, "Missing resource parameter", http.StatusBadRequest)
+		return
+	}
+
+	parts := strings.SplitN(resource, ":", 2)
+	if len(parts) != 2 || parts[0] != "acct" {
+		http.Error(w, "Invalid resource format", http.StatusBadRequest)
+		return
+	}
+
+	accountName := parts[1]
+	username := strings.Split(accountName, "@")[0]
+
+	// Validate the accountName against the users in the config and the domain the site runs on
+	users := viper.GetStringMap("users")
+	if _, exists := users[username]; !exists {
+		http.Error(w, "Account not found", http.StatusNotFound)
+		return
+	}
+
+	// extract `domain` from the request
+	domain := r.Host
+	if !strings.HasSuffix(accountName, "@"+domain) {
+		http.Error(w, "Invalid domain", http.StatusBadRequest)
+		return
+	}
+
+	schema := "http"
+	if r.TLS != nil {
+		schema = "https"
+	}
+	profileURL := fmt.Sprintf("%s://%s/@%s", schema, domain, username)
+	homepageURL := fmt.Sprintf("%s://%s/", schema, domain)
+
+	rendered := fmt.Sprintf(`{  
+		"subject": "acct:%s",
 		"aliases": [
-		  "https://asymptomatic.net/@ringmaster"
+		  "%s"
 		],
 		"links": [
 		  {
 			"rel": "self",
 			"type": "application/activity+json",
-			"href": "https://asymptomatic.net/@ringmaster"
+			"href": "%s"
 		  },
 		  {
 			"rel":"http://webfinger.net/rel/profile-page",
 			"type":"text/html",
-			"href":"https://asymptomatic.net/"
+			"href":"%s"
 		  }
 		]
-	}`
+	}`, accountName, profileURL, profileURL, homepageURL)
 
 	w.Write([]byte(rendered))
 }

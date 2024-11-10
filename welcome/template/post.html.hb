@@ -1,3 +1,32 @@
+{{#define "title"}}
+    {{#withfirst posts}}
+    {{title}}
+    {{/withfirst}}
+{{/define}}
+
+{{#define "head"}}
+    {{#withfirst posts}}
+        <meta property="og:title" content="{{title}}" />
+        {{#if frontmatter.description}}
+        <meta name="description" content="{{frontmatter.description}}">
+        <meta property="og:description" content="{{head html 200}}" />
+        {{else}}
+        <meta name="description" content="{{head html 200}}">
+        <meta property="og:description" content="{{head html 200}}" />
+        {{/if}}
+        {{#if frontmatter.hero}}
+        <meta property="og:image" content="{{s3 frontmatter.hero}}" />
+        {{/if}}
+
+        {{#if frontmatter.keywords}}
+        <meta name="keywords" content="{{frontmatter.keywords}}">
+        {{/if}}
+        {{#if authors}}
+        <meta name="author" content="{{#each authors}}{{.}}{{#unless @last}},{{/unless}}{{/each}}">
+        {{/if}}
+    {{/withfirst}}
+{{/define}}
+
 {{#define "content"}}
 {{#each posts.Items}}
 {{#with this}}

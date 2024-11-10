@@ -1,4 +1,5 @@
 {{#define "content"}}
+{{#if posts.Items}}
 {{#each posts.Items}}
 {{#with this}}
 <article>
@@ -23,6 +24,9 @@
 </article>
 {{/with}}
 {{/each}}
+{{else}}
+<p>No posts found.</p>
+{{/if}}
 
 <ul>
 {{#paginate pages curpage}}

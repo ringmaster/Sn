@@ -4,11 +4,12 @@
     <meta charset="utf-8"/>
     <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>{{config.title}}</title>
+    <title>{{config.title}}{{block "title" prefix=" - "}}</title>
     <link rel="stylesheet" href="/static/simple.min.css" crossorigin="anonymous">
     <link rel="stylesheet" href="/static/styles.css">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="icon" type="image/png" href="/static/favicon.png">
+    {{block "head"}}
   </head>
   <body>
     <header>

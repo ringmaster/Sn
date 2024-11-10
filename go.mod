@@ -35,13 +35,10 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/stretchr/testify v1.9.0 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
-	go.hacdias.com/indielib v0.4.0 // indirect
 	golang.org/x/oauth2 v0.22.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/term v0.23.0 // indirect
 	gopkg.in/square/go-jose.v2 v2.1.9 // indirect
-	willnorris.com/go/microformats v1.2.1-0.20240301064101-b5d1b9d2120e // indirect
-	willnorris.com/go/webmention v0.0.0-20220108183051-4a23794272f0 // indirect
 )
 
 require (

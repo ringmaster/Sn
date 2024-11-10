@@ -3,6 +3,7 @@ package sn
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
@@ -48,7 +49,8 @@ func schema() string {
 		"raw" text(128),
 		"html" text(128),
 		"source" varchar(128),
-		"title" varchar(255) NOT NULL
+		"title" varchar(255) NOT NULL,
+		"frontmatter" text(128)
 	  );
 	  
 	  CREATE INDEX IF NOT EXISTS items_repo ON "items" ("repo" ASC);
@@ -474,8 +476,9 @@ func replaceImgSrc(html string) (string, error) {
 }
 
 func insertItem(item Item) (int64, error) {
+	frontmatter, _ := json.Marshal(item.Frontmatter)
 	result, err := db.Exec(
-		"INSERT INTO items (slug, repo, publishedon, rawpublishedon, raw, html, source, title) VALUES (?,?,?,?,?,?,?,?)",
+		"INSERT INTO items (slug, repo, publishedon, rawpublishedon, raw, html, source, title, frontmatter) VALUES (?,?,?,?,?,?,?,?,?)",
 		item.Slug,
 		item.Repo,
 		item.Date,
@@ -484,6 +487,7 @@ func insertItem(item Item) (int64, error) {
 		item.Html,
 		item.Source,
 		item.Title,
+		frontmatter,
 	)
 
 	if err != nil {
@@ -644,6 +648,8 @@ func setQryValue(field **string, params map[string]interface{}, key string) {
 	}
 }
 
+// outVariableParams is a map of the parameters that define the content of the out variable
+// context is a map of the parameters that define the context of the route
 func ItemsFromOutvals(outVariableParams map[string]interface{}, context map[string]interface{}) ItemResult {
 	qry := ItemQuery{Page: 1, Frontmatter: make(map[string]string)}
 
@@ -676,6 +682,10 @@ func ItemsFromOutvals(outVariableParams map[string]interface{}, context map[stri
 	setQryValue(&qry.Author, params, "author")
 	setQryValue(&qry.Search, params, "search")
 	setQryValue(&qry.OrderBy, params, "order_by")
+
+	if outVariableParams["frontmatter"] != nil {
+		qry.Frontmatter = outVariableParams["frontmatter"].(map[string]string)
+	}
 
 	return ItemsFromItemQuery(qry)
 }

@@ -24,6 +24,8 @@ repos:
   posts:
     # path - The directory inside of the root path that will be scanned for files for this repo
     path: posts
+  pages:
+    path: pages
 # users - A list of users for authentication
 users:
     test:
@@ -65,7 +67,7 @@ routes:
     handler: static
     file: static/favicon.svg
   04_categories:
-    path: /tag/{category}
+    path: /tag/{tag}
     handler: posts
     templates: 
       - posts.html.hb
@@ -73,11 +75,11 @@ routes:
     out:
       posts:
         repo: posts
-        category: "{category}"
+        tag: "{tag}"
         paginate_name: page
         paginate_count: 5
   05_posts:
-    path: /posts/{slug:.+}
+    path: /posts/{slug:[^/]+}
     handler: posts
     templates: 
       - post.html.hb
@@ -87,7 +89,22 @@ routes:
         repo: posts
         slug: "{slug}"
         404_on_empty: fof
-  06_search:
+  05a_posts:
+    path: /posts/{slug:[^/]+}/
+    handler: redirect
+    to: /posts/{slug}
+  06_pages:
+    path: /pages/{pageslug:[^/]+}
+    handler: posts
+    templates: 
+      - post.html.hb
+      - layout.html.hb
+    out:
+      posts:
+        repo: pages
+        slug: "{pageslug}"
+        404_on_empty: fof
+  07_search:
     path: /search
     template: posts.html.hb
     layout: layout.html.hb

@@ -437,8 +437,12 @@ func templateHandler(w http.ResponseWriter, r *http.Request, routeName string) {
 
 		outval := viper.Get(qlocation)
 		switch v := outval.(type) {
-		case bool, int, string:
-			context[outVarName] = routeStringValue(r, v.(string))
+		case bool:
+			context[outVarName] = v
+		case int:
+			context[outVarName] = v
+		case string:
+			context[outVarName] = routeStringValue(r, v)
 		default:
 			outvals := maps.Clone(viper.GetStringMap(qlocation))
 			itemResult := ItemsFromOutvals(outvals, context)

@@ -88,7 +88,8 @@ submitPost() {
     title: this.title,
     slug: this.slug,
     content: this.content,
-    tags: this.tags,
+    tags: this.tags || document.getElementById('postTags').BulmaTagsInput().value
+    ,
     repo: document.getElementById('postRepo').value,
     hero: this.hero,
   };
@@ -129,7 +130,8 @@ submitPost() {
 },
 init() {
   $watch('title', () => this.updateSlug());
-  this.slugPattern = Alpine.store('api').data.slugPattern || this.slugPattern
+  this.slugPattern = Alpine.store('api').data.slugPattern || this.slugPattern;
+  BulmaTagsInput.attach();
   const easyMDE = new EasyMDE({
     uploadImage: true, 
     element: document.getElementById('postContent'),
@@ -255,6 +257,7 @@ init() {
               <input
                 class="input"
                 type="text"
+                data-type="tags"
                 placeholder="Enter tags"
                 id="postTags"
                 x-model="tags"

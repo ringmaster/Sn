@@ -663,7 +663,15 @@ func repoRestPostHandler(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "session")
 	username := session.Values["username"].(string)
 
-	markdownContent := fmt.Sprintf("---\ntitle: %s\nslug: %s\ndate: %s\ntags: %s\nhero: %s\nauthors:\n  - %s\n---\n\n%s", payload.Title, payload.Slug, payload.Date, payload.Tags, payload.Hero, username, payload.Content)
+	var yamlTags []string
+	if payload.Tags != "" {
+		yamlTags = strings.Split(payload.Tags, ",")
+		for i, tag := range yamlTags {
+			yamlTags[i] = fmt.Sprintf("  - %s", strings.TrimSpace(tag))
+		}
+	}
+
+	markdownContent := fmt.Sprintf("---\ntitle: %s\nslug: %s\ndate: %s\ntags:\n%s\nhero: %s\nauthors:\n  - %s\n---\n\n%s", payload.Title, payload.Slug, payload.Date, strings.Join(yamlTags, "\n"), payload.Hero, username, payload.Content)
 	markdownFilePath := filepath.Join(repoPath, payload.Slug+".md")
 
 	if err := afero.WriteFile(Vfs, markdownFilePath, []byte(markdownContent), 0644); err != nil {

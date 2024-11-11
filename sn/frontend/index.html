@@ -52,6 +52,12 @@
       referrerpolicy="no-referrer"
     ></script>
 
+    <!-- Bulma Tooltip -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@creativebulma/bulma-tooltip@1.2.0/dist/bulma-tooltip.min.css"
+    />
+
     <!-- EasyMDE -->
     <link
       rel="stylesheet"
@@ -89,6 +95,12 @@
             try {
               const response = await fetch("{{BASE_PATH}}/api");
               this.data = await response.json();
+              if (!this.data.gitCredentialsValid) {
+                bulmaToast.toast({
+                  message: "There is an issue with the git credentials.",
+                  type: "is-error",
+                });
+              }
             } catch (error) {
               console.error("Error loading data:", error);
             }
@@ -187,13 +199,51 @@
         :class="{'is-active': navMenu}"
       >
         <div class="navbar-start">
-          <a x-show="$store.api.data.loggedIn" class="navbar-item" href="/compose"> Compose </a>
-          <a x-show="$store.api.data.loggedIn" class="navbar-item" href="/posts"> Posts </a>
-          <a x-show="$store.api.data.loggedIn" class="navbar-item" href="/" native> Home </a>
+          <a
+            x-show="$store.api.data.loggedIn"
+            class="navbar-item"
+            href="/compose"
+          >
+            Compose
+          </a>
+          <a
+            x-show="$store.api.data.loggedIn"
+            class="navbar-item"
+            href="/posts"
+          >
+            Posts
+          </a>
+          <a
+            x-show="$store.api.data.loggedIn"
+            class="navbar-item"
+            href="/"
+            native
+          >
+            Home
+          </a>
           <hr class="navbar-divider" />
-          <a x-show="$store.api.data.loggedIn" class="navbar-item" @click="logout()"> Log Out </a>
-          <a x-show="! $store.api.data.loggedIn" class="navbar-item" href="/" native> Home </a>
-          <a x-show="! $store.api.data.loggedIn" class="navbar-item" href="/login"> Login </a>
+          <a
+            x-show="$store.api.data.loggedIn"
+            class="navbar-item"
+            @click="logout()"
+          >
+            Log Out
+          </a>
+          <a
+            x-show="! $store.api.data.loggedIn"
+            class="navbar-item"
+            href="/"
+            native
+          >
+            Home
+          </a>
+          <a
+            x-show="! $store.api.data.loggedIn"
+            class="navbar-item"
+            href="/login"
+          >
+            Login
+          </a>
         </div>
       </div>
     </nav>

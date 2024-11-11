@@ -554,7 +554,7 @@ func dataHandler(w http.ResponseWriter, r *http.Request) {
 	// User is authenticated, supply full response
 	username := session.Values["username"].(string)
 	repos := viper.GetStringMap("repos")
-	gitCredentialsValid := false
+	gitCredentialsValid := true
 	gitStatus := "Ok"
 
 	if snGitRepo := os.Getenv("SN_GIT_REPO"); snGitRepo != "" {
@@ -569,12 +569,18 @@ func dataHandler(w http.ResponseWriter, r *http.Request) {
 		switch err {
 		case nil, git.NoErrAlreadyUpToDate:
 			gitCredentialsValid = true
+			gitStatus = "Commit and Push"
 		case transport.ErrAuthorizationFailed:
+			gitCredentialsValid = false
 			gitStatus = "Authorization failed"
 		default:
-			gitStatus = "Failed to push to the remote repository"
-			slog.Error("Failed to push to the remote repository", "error", err)
+			gitStatus = err.Error()
+			gitCredentialsValid = false
+			slog.Error("Cannot push to the remote repository with current credentials", "error", err)
 		}
+	} else {
+		gitCredentialsValid = true
+		gitStatus = "Save to local"
 	}
 
 	response := map[string]interface{}{

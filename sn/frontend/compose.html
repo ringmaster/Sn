@@ -335,7 +335,7 @@ init() {
             </button>
           </div>
           <div class="control">
-            <button class="button is-primary" x-on:click="submitPost">
+            <button class="button is-primary has-tooltip-arrow" x-on:click="submitPost" :data-tooltip="$store.api.data.gitStatus" :disabled="!$store.api.data.gitCredentialsValid">
               Submit
             </button>
           </div>

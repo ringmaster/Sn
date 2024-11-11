@@ -31,14 +31,17 @@ require (
 )
 
 require (
+	github.com/go-git/go-git v4.7.0+incompatible // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/src-d/gcfg v1.4.0 // indirect
 	github.com/stretchr/testify v1.9.0 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
 	golang.org/x/oauth2 v0.22.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/term v0.23.0 // indirect
 	gopkg.in/square/go-jose.v2 v2.1.9 // indirect
+	gopkg.in/src-d/go-git.v4 v4.13.1 // indirect
 )
 
 require (

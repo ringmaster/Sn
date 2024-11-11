@@ -27,6 +27,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/c4milo/afero2billy"
+	"github.com/go-git/go-git/plumbing/transport"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	gitHttp "github.com/go-git/go-git/v5/plumbing/transport/http"
@@ -553,12 +554,36 @@ func dataHandler(w http.ResponseWriter, r *http.Request) {
 	// User is authenticated, supply full response
 	username := session.Values["username"].(string)
 	repos := viper.GetStringMap("repos")
+	gitCredentialsValid := false
+	gitStatus := "Ok"
+
+	if snGitRepo := os.Getenv("SN_GIT_REPO"); snGitRepo != "" {
+		gitusername := os.Getenv("SN_GIT_USERNAME")
+		gitpassword := os.Getenv("SN_GIT_PASSWORD")
+		err := Repo.Push(&git.PushOptions{
+			Auth: &gitHttp.BasicAuth{
+				Username: gitusername,
+				Password: gitpassword,
+			},
+		})
+		switch err {
+		case nil, git.NoErrAlreadyUpToDate:
+			gitCredentialsValid = true
+		case transport.ErrAuthorizationFailed:
+			gitStatus = "Authorization failed"
+		default:
+			gitStatus = "Failed to push to the remote repository"
+			slog.Error("Failed to push to the remote repository", "error", err)
+		}
+	}
 
 	response := map[string]interface{}{
-		"loggedIn":    true,
-		"username":    username,
-		"repos":       repos,
-		"slugPattern": viper.GetString("slug_pattern"),
+		"loggedIn":            true,
+		"username":            username,
+		"repos":               repos,
+		"slugPattern":         viper.GetString("slug_pattern"),
+		"gitCredentialsValid": gitCredentialsValid,
+		"gitStatus":           gitStatus,
 	}
 
 	json.NewEncoder(w).Encode(response)

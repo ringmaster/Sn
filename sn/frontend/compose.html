@@ -236,11 +236,10 @@ init() {
                   name="repo"
                   x-model="repo"
                   x-init="repo = $store.api.data.repos[0]"
-                  x-ref="repo"
+                  x-data="{ repos: $store.api.data.repos }"
                 >
-                  <!--option value="" disabled selected>Select a repository</option-->
                   <template
-                    x-data="$store.api.data"
+                    label="Repos"
                     x-for="(repo, repoName) in repos"
                     :key="repoName"
                   >
@@ -338,7 +337,12 @@ init() {
             </button>
           </div>
           <div class="control">
-            <button class="button is-primary has-tooltip-arrow" x-on:click="submitPost" :data-tooltip="$store.api.data.gitStatus" :disabled="!$store.api.data.gitCredentialsValid">
+            <button
+              class="button is-primary has-tooltip-arrow"
+              x-on:click="submitPost"
+              :data-tooltip="$store.api.data.gitStatus"
+              :disabled="!$store.api.data.gitCredentialsValid"
+            >
               Submit
             </button>
           </div>

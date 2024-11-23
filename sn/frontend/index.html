@@ -84,7 +84,6 @@
         window.PineconeRouter.settings.hash = false;
         window.PineconeRouter.settings.basePath = "{{BASE_PATH}}";
         window.PineconeRouter.settings.interceptLinks = true;
-        window.PineconeRouter.settings.templateTargetId = "app";
 
         // When the page loads, load the blog data from the api endpoint
         Alpine.store("api", {
@@ -102,7 +101,10 @@
             try {
               const response = await fetch("{{BASE_PATH}}/api");
               this.data = await response.json();
-              if (!this.data.gitCredentialsValid) {
+              if (!this.data.loggedIn) {
+                window.PineconeRouter.context.redirect("/login");
+              }
+              if (this.data.loaded && !this.data.gitCredentialsValid) {
                 bulmaToast.toast({
                   message: "There is an issue with the git credentials.",
                   type: "is-error",
@@ -119,7 +121,7 @@
             Alpine.store("api").data.loaded &&
             !Alpine.store("api").data.loggedIn
           ) {
-            window.PineconeRouter.context.navigate("/login");
+            window.PineconeRouter.context.redirect("/login");
           }
         });
       });

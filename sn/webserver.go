@@ -994,6 +994,12 @@ func setupRoutes(router *mux.Router) {
 func LogMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		remoteIP := r.RemoteAddr
+		if ip := r.Header.Get("X-Real-IP"); ip != "" {
+			remoteIP = ip
+		} else if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
+			remoteIP = ip
+		}
 		logger := slog.Default()
 		setRootUrl(r)
 
@@ -1006,9 +1012,9 @@ func LogMiddleware(next http.Handler) http.Handler {
 		if session.Values["authenticated"] == true {
 			username = session.Values["username"].(string)
 		}
-
-		logger.Info("web request", "request_duration", fmt.Sprintf("%dms", time.Since(start).Milliseconds()),
-			"route", mux.CurrentRoute(r).GetName(), "path", r.URL.Path, "username", username)
+		referrer := r.Referer()
+		logger.Info("web request", "remote_ip", remoteIP, "request_duration", fmt.Sprintf("%dms", time.Since(start).Milliseconds()),
+			"route", mux.CurrentRoute(r).GetName(), "path", r.URL.Path, "username", username, "referrer", referrer)
 	})
 }
 

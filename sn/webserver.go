@@ -219,7 +219,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	output := fmt.Sprintf("{\"cdn\": \"%s%s\"}", spaceConfData["cdn"], header.Filename)
+	output := fmt.Sprintf("{\"cdn\": \"%s%s\", \"s3\": \"s3://%s/%s\"}", spaceConfData["cdn"], header.Filename, spaceConfData["spacename"], header.Filename)
 
 	w.Header().Add("Content-Type", "application/json")
 	w.Write([]byte(output))
@@ -236,7 +236,8 @@ func uploadToSpaces(file io.ReadSeeker, filename string, spaceConf SpacesConfig,
 	// Step 3: The new session validates your request and directs it to your Space's specified endpoint using the AWS SDK.
 	newSession, err := session.NewSession(s3Config)
 	if err != nil {
-		fmt.Println(err)
+		slog.Error("Could not create new S3 session", "error", err.Error())
+		return err
 	}
 	s3Client := s3.New(newSession)
 
@@ -260,6 +261,7 @@ func uploadToSpaces(file io.ReadSeeker, filename string, spaceConf SpacesConfig,
 		fmt.Println(err.Error())
 		fmt.Println(s3Config)
 		fmt.Println(object)
+		return err
 	}
 
 	return nil

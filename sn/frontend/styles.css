@@ -60,3 +60,10 @@ body {
     flex: 1;
     flex-direction: column;
 }
+
+html .editor-toolbar.fullscreen {
+    top: 50px;
+}
+html .EasyMDEContainer .CodeMirror-fullscreen {
+    top: 100px;
+}

@@ -136,6 +136,26 @@ init() {
     uploadImage: true, 
     element: document.getElementById('postContent'),
     imageAccept: ['image/jpeg'],
+    toolbar: ['bold', 'italic', 'heading', '|', 'quote', 'unordered-list', 'ordered-list', '|', 'link', 'image', 
+    {
+      name: 'upload',
+      action: (editor) => {
+        i = document.getElementsByClassName('imageInput')[0];
+        i.click();
+        i.addEventListener('change', (function r(o) {
+          for (var k = 0; k < o.target.files.length; k++)
+            editor.options.imageUploadFunction(o.target.files[k]).then((function (s) {
+              n.replaceSelection('![](' + s.s3 + ')', 'end')
+            })).catch((function (s) {
+              console.error('Failed to upload image', s)
+            }));
+          i.removeEventListener('change', r)
+        }))
+      },
+      className: 'fa fa-upload',
+      title: 'Upload an image',
+    }, '|', 'fullscreen'],
+    imageInputName: 'easyMDEImage',
     imageUploadFunction: (file) => {
       return new Promise((resolve, reject) => {
         const formData = new FormData();
@@ -146,13 +166,13 @@ init() {
         })
           .then(response => response.json())
           .then(data => {
-            if (data.success) {
-              resolve({ url: data.url });
+            if (data.cdn) {
+              resolve({ url: data.s3 });
             } else {
               reject('Upload failed');
             }
           })
-          .catch(reject);
+          .catch(data => reject('Upload failed'));
       });
     },
   });
@@ -193,6 +213,7 @@ init() {
           id="postContent"
           x-model="content"
         ></textarea>
+        <input class="imageInput" type="file" multiple="" name="easyMDEImage" accept="image/png, image/jpeg, image/gif, image/avif" style="display: none; opacity: 0;">
       </div>
     </div>
 

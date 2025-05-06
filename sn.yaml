@@ -7,13 +7,13 @@ title: Sn
 # subtitle - The subtitle of the site, usable in templates for output as {subtitle}
 subtitle: Sn is Tin
 # rooturl - The root url of the site, usable in templates for output as {rooturl}
-rooturl: 'http://localhost/'
+rooturl: "http://localhost/"
 # port - The port on which the server runs
 port: 8080
 # path - The "root path" for all referenced files here, relative to this file
 path: welcome
 # dbfile - The name of a database file or leave blank to use an in-memory database
-dbfile: 'file:sn?mode=memory&cache=shared'
+dbfile: "file:sn?mode=memory&cache=shared"
 # dbfile: 'asy.db'
 # cleandb - true/false whether to start with a fresh database every time the app starts
 cleandb: true
@@ -28,8 +28,8 @@ repos:
     path: pages
 # users - A list of users for authentication
 users:
-    test:
-        passwordhash: $2a$10$X7szeKDWNVDNNTIvg5/uRuIY0ETKkWeDbG/Pk7VfJxa9RnNlg9ki2
+  test:
+    passwordhash: $2a$10$X7szeKDWNVDNNTIvg5/uRuIY0ETKkWeDbG/Pk7VfJxa9RnNlg9ki2
 webauthn:
   rp_display_name: Sn
   rp_id: localhost
@@ -45,7 +45,7 @@ routes:
     # handler - The handler used to process the data to supply to the templates, options: posts, static, debug, git
     handler: posts
     # template - The templates to use to render the content of this page, rendered in order
-    templates: 
+    templates:
       - posts.html.hb
       - layout.html.hb
     # out - A list of named queries that supply data to the template, each name becomes a value that can be used in the template
@@ -69,7 +69,7 @@ routes:
   04_categories:
     path: /tag/{tag}
     handler: posts
-    templates: 
+    templates:
       - posts.html.hb
       - layout.html.hb
     out:
@@ -81,7 +81,7 @@ routes:
   05_posts:
     path: /posts/{slug:[^/]+}
     handler: posts
-    templates: 
+    templates:
       - post.html.hb
       - layout.html.hb
     out:
@@ -96,7 +96,7 @@ routes:
   06_pages:
     path: /pages/{pageslug:[^/]+}
     handler: posts
-    templates: 
+    templates:
       - post.html.hb
       - layout.html.hb
     out:
@@ -130,7 +130,7 @@ routes:
   fof:
     path: /{any:.*}
     handler: posts
-    templates: 
+    http_status: 404
+    templates:
       - 404.html.hb
       - layout.html.hb
-

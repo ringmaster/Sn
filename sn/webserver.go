@@ -19,6 +19,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -461,7 +462,9 @@ func templateHandler(w http.ResponseWriter, r *http.Request, routeName string) {
 	if viper.IsSet(fmt.Sprintf("%s.content-type", routeConfigLocation)) {
 		context["mime"] = viper.GetString(fmt.Sprintf("%s.content-type", routeConfigLocation))
 	}
-	context["http_status"] = 200
+	if context["http_status"] == nil {
+		context["http_status"] = 200
+	}
 
 	rendered, err := RenderTemplateFiles(templateFiles, context)
 	if err != nil {
@@ -480,11 +483,33 @@ func templateHandler(w http.ResponseWriter, r *http.Request, routeName string) {
 	if viper.IsSet(fmt.Sprintf("%s.location", routeConfigLocation)) {
 		context["location"] = viper.GetString(fmt.Sprintf("%s.location", routeConfigLocation))
 		w.Header().Add("location", context["location"].(string))
-		if context["http_status"] == "200" {
+		if context["http_status"] == 200 {
 			context["http_status"] = 302
 		}
 	}
-	w.WriteHeader(context["http_status"].(int))
+	// Ensure it's an int before writing header
+	var statusCode int
+	switch v := context["http_status"].(type) {
+	case int:
+		statusCode = v
+	case float64: // In case it's a JSON number
+		statusCode = int(v)
+	case string:
+		// Convert string to int
+		if code, err := strconv.Atoi(v); err == nil {
+			statusCode = code
+		} else {
+			// Default to 200 if conversion fails
+			statusCode = 200
+			slog.Default().Warn("Failed to convert http_status to integer", "value", v, "err", err)
+		}
+	default:
+		// Default to 200 for any other types
+		statusCode = 200
+		slog.Default().Warn("Unexpected http_status type", "type", fmt.Sprintf("%T", v), "value", v)
+	}
+	
+	w.WriteHeader(statusCode)
 
 	w.Write([]byte(rendered))
 }
@@ -808,7 +833,7 @@ func fingerHandler(w http.ResponseWriter, r *http.Request) {
 	profileURL := fmt.Sprintf("%s://%s/@%s", schema, domain, username)
 	homepageURL := fmt.Sprintf("%s://%s/", schema, domain)
 
-	rendered := fmt.Sprintf(`{  
+	rendered := fmt.Sprintf(`{
 		"subject": "acct:%s",
 		"aliases": [
 		  "%s"

@@ -176,12 +176,43 @@ func (km *KeyManager) buildSignatureString(req *http.Request, headers []string) 
 			if value == "" && req.URL != nil {
 				value = req.URL.Host
 			}
+			if value == "" && req.Host != "" {
+				value = req.Host
+			}
+			if value == "" {
+				// Some servers don't send Host header, try to reconstruct it
+				if req.URL != nil {
+					if req.URL.Host != "" {
+						value = req.URL.Host
+					} else {
+						// Last resort: use the host from the request URI
+						value = req.URL.Hostname()
+						if req.URL.Port() != "" && req.URL.Port() != "80" && req.URL.Port() != "443" {
+							value = value + ":" + req.URL.Port()
+						}
+					}
+				}
+			}
 		default:
 			value = req.Header.Get(header)
 		}
 
 		if value == "" && header != "digest" {
-			return "", fmt.Errorf("header %s not found or empty", header)
+			// Log the missing header for debugging
+			slog.Warn("Missing header in signature verification", "header", header, "method", req.Method, "url", req.URL.String())
+			// For host header, try one more fallback
+			if header == "host" {
+				// Use a default localhost value if nothing else works
+				if req.URL != nil && req.URL.Host == "" {
+					value = "localhost"
+					if req.URL.Port() != "" && req.URL.Port() != "80" && req.URL.Port() != "443" {
+						value = value + ":" + req.URL.Port()
+					}
+				}
+			}
+			if value == "" {
+				return "", fmt.Errorf("header %s not found or empty", header)
+			}
 		}
 
 		parts = append(parts, strings.ToLower(header)+": "+value)

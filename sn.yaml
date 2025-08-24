@@ -14,7 +14,7 @@ port: 8080
 path: welcome
 # ActivityPub configuration
 activitypub:
-  enabled: false
+  enabled: true
   primary_user: test
   branch: activitypub-data
   commit_interval_minutes: 0 # Set to 0 for immediate commits (testing)

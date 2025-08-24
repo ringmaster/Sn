@@ -168,16 +168,22 @@ func (m *Manager) handleActorWithContentNegotiation(w http.ResponseWriter, r *ht
 }
 
 // PublishPost publishes a blog post to ActivityPub
+// For multi-author posts, publishes under each author that exists in the users config
 func (m *Manager) PublishPost(post *BlogPost) error {
 	if !m.enabled {
 		return nil
 	}
 
 	baseURL := getBaseURL()
+
+	// If post has multiple authors, we could publish from each one
+	// For now, we'll publish from the primary author (handled in outboxService)
+	// TODO: Consider if we want to publish the same post from multiple actors
 	return m.outboxService.PublishPost(post, baseURL)
 }
 
 // UpdatePost publishes an update for a blog post to ActivityPub
+// Updates are published from the same author as the original post
 func (m *Manager) UpdatePost(post *BlogPost) error {
 	if !m.enabled {
 		return nil
@@ -188,6 +194,7 @@ func (m *Manager) UpdatePost(post *BlogPost) error {
 }
 
 // DeletePost publishes a delete activity for a blog post to ActivityPub
+// Since we may not have the original post data, falls back to repo owner
 func (m *Manager) DeletePost(postURL, repo string) error {
 	if !m.enabled {
 		return nil

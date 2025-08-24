@@ -66,7 +66,7 @@ repos:
 
 #### Per-repo ActivityPub settings:
 - `activitypub`: Whether posts from this repo should be federated (default: true if global ActivityPub is enabled)
-- `owner`: Which user owns this repo for ActivityPub purposes
+- `owner`: Fallback user when posts don't specify valid authors (used mainly for deletions)
 
 ## Storage Architecture
 
@@ -85,10 +85,15 @@ ActivityPub Repository (activitypub-data branch):
 ├── pages/           # Merged from main branch
 ├── config.yaml      # Merged from main branch
 └── .activitypub/    # Only exists on this branch
-    ├── followers.json
-    ├── following.json
     ├── keys.json
     ├── metadata.json
+    ├── users/           # Per-user ActivityPub data
+    │   ├── alice/
+    │   │   ├── followers.json
+    │   │   └── following.json
+    │   └── bob/
+    │       ├── followers.json
+    │       └── following.json
     └── comments/
         └── blog/
             └── my-post-slug/
@@ -100,6 +105,7 @@ ActivityPub Repository (activitypub-data branch):
 - **Historical Correlation**: ActivityPub commits reference content state
 - **No Branch Switching**: Two separate working directories
 - **Complete Audit Trail**: Git history shows relationship between content and engagement
+- **Per-User Data**: Each user has their own followers/following stored separately
 
 ### Local Mode
 In local filesystem mode, ActivityPub data is stored in a `.activitypub/` directory within your main content directory.
@@ -119,9 +125,37 @@ People can follow your blog by searching for `@username@yourdomain.com` in their
 
 When ActivityPub is enabled for a repo, new posts are automatically:
 
-1. **Published**: Sent to all followers as `Create` activities
-2. **Updated**: Changes sent as `Update` activities
-3. **Deleted**: Deletions sent as `Delete` activities
+1. **Published**: Sent to all followers as `Create` activities from the post's primary author
+2. **Updated**: Changes sent as `Update` activities from the same author
+3. **Deleted**: Deletions sent as `Delete` activities (may fall back to repo owner)
+
+#### Multi-Author Posts
+
+Posts can have multiple authors specified in their frontmatter:
+
+```yaml
+---
+title: "Collaborative Post"
+authors:
+  - alice
+  - bob
+---
+```
+
+For multi-author posts:
+- The **primary author** (first in the list) becomes the ActivityPub actor who publishes the post
+- All valid authors are included in the `attributedTo` field of the ActivityPub object
+- The post is delivered to followers of the primary author
+- Co-authors must exist in the `users` configuration to be included
+
+#### Author Resolution
+
+The system determines the publishing author using this priority:
+
+1. **Post Authors**: Uses the first valid author from the post's frontmatter
+2. **Repo Owner**: Falls back to the repo's configured owner
+3. **Primary User**: Falls back to the global `activitypub.primary_user`
+4. **First User**: Falls back to the first user in the configuration
 
 ### Receiving Comments
 
@@ -170,12 +204,40 @@ blogPost := &activitypub.BlogPost{
     MarkdownContent: "Post content...",
     PublishedAt:     time.Now(),
     Tags:            []string{"tech", "blog"},
+    Authors:         []string{"alice", "bob"}, // Multiple authors supported
     Repo:            "posts",
     Slug:            "my-post",
 }
 
 err := ActivityPubManager.PublishPost(blogPost)
 ```
+
+### Understanding Multi-Author Publishing
+
+When a post has multiple authors, the ActivityPub object will look like this:
+
+```json
+{
+  "@context": ["https://www.w3.org/ns/activitystreams"],
+  "type": "Article",
+  "attributedTo": [
+    "https://myblog.com/@alice",
+    "https://myblog.com/@bob"
+  ],
+  "name": "Collaborative Post",
+  "content": "Post content...",
+  "to": ["https://www.w3.org/ns/activitystreams#Public"],
+  "cc": [
+    "https://myblog.com/@alice/followers",
+    "https://myblog.com/@bob/followers"
+  ]
+}
+```
+
+The Activity (Create/Update) will have:
+- **Actor**: The primary author (alice)
+- **Object**: The article with multiple attributedTo values
+- **CC**: Followers of all authors (for maximum reach)
 
 ### Getting Comments for a Post
 
@@ -246,7 +308,7 @@ SN_CONFIG=/path/to/sn.yaml
 2. **Network**: Ensure your server is reachable from the internet
 3. **SSL/TLS**: ActivityPub requires HTTPS in production
 
-## Performance Considerations
+### Performance Considerations
 
 ### Batched Commits
 ActivityPub data is committed periodically (not immediately) to avoid:
@@ -258,6 +320,11 @@ ActivityPub data is committed periodically (not immediately) to avoid:
 - **Activity Delivery**: Sent to followers in background
 - **Comment Processing**: Handled asynchronously
 - **Key Generation**: Only done once on initialization
+
+### Multi-Author Efficiency
+- **Single Delivery**: Multi-author posts are delivered once from the primary author
+- **Per-User Storage**: Each user's followers/following are stored separately
+- **Aggregated Reach**: Posts include all authors' followers in CC for maximum visibility
 
 ## Compatibility
 

@@ -138,13 +138,16 @@ func (os *OutboxService) PublishPost(post *BlogPost, baseURL string) error {
 		return nil
 	}
 
-	// Get the primary user for this repo (for now, use first configured user)
-	username := getRepoOwner(post.Repo)
-	if username == "" {
-		return fmt.Errorf("no owner configured for repo: %s", post.Repo)
+	// Get the primary author for this post
+	author := getPostPrimaryAuthor(post)
+	if author == "" {
+		return fmt.Errorf("no valid author found for post: %s", post.Title)
 	}
 
-	actorURL := fmt.Sprintf("%s/@%s", baseURL, username)
+	actorURL := fmt.Sprintf("%s/@%s", baseURL, author)
+
+	// Build attribution - can be a single actor or array of actors for multi-author posts
+	attribution := buildPostAttribution(post, baseURL)
 
 	// Create the Article object
 	article := &Article{
@@ -156,10 +159,10 @@ func (os *OutboxService) PublishPost(post *BlogPost, baseURL string) error {
 			Content:      post.HTMLContent,
 			Summary:      post.Summary,
 			URL:          post.URL,
-			AttributedTo: actorURL,
+			AttributedTo: attribution, // Can be string or []string
 			Published:    post.PublishedAt.Format(time.RFC3339),
 			To:           []string{"https://www.w3.org/ns/activitystreams#Public"},
-			CC:           []string{actorURL + "/followers"},
+			CC:           buildFollowersCC(post, baseURL), // Include all authors' followers
 			Tag:          convertTagsToActivityPub(post.Tags),
 		},
 	}
@@ -172,25 +175,25 @@ func (os *OutboxService) PublishPost(post *BlogPost, baseURL string) error {
 	}
 
 	// Create the Create activity
-	activityID := GenerateActivityID(baseURL, username)
+	activityID := GenerateActivityID(baseURL, author)
 	createActivity := &Activity{
 		Context:   ActivityPubContext,
 		ID:        activityID,
 		Type:      TypeCreate,
-		Actor:     actorURL,
+		Actor:     actorURL, // Primary author is the actor
 		Object:    article,
 		Published: post.PublishedAt.Format(time.RFC3339),
 		To:        []string{"https://www.w3.org/ns/activitystreams#Public"},
-		CC:        []string{actorURL + "/followers"},
+		CC:        buildFollowersCC(post, baseURL), // Include all authors' followers
 	}
 
 	// Deliver to followers
-	err := os.deliverToFollowers(createActivity, username)
+	err := os.deliverToFollowers(createActivity, author)
 	if err != nil {
 		return fmt.Errorf("failed to deliver to followers: %w", err)
 	}
 
-	slog.Info("Blog post published to ActivityPub", "title", post.Title, "url", post.URL, "actor", actorURL)
+	slog.Info("Blog post published to ActivityPub", "title", post.Title, "url", post.URL, "actor", actorURL, "author", author)
 	return nil
 }
 
@@ -201,12 +204,15 @@ func (os *OutboxService) UpdatePost(post *BlogPost, baseURL string) error {
 		return nil
 	}
 
-	username := getRepoOwner(post.Repo)
-	if username == "" {
-		return fmt.Errorf("no owner configured for repo: %s", post.Repo)
+	author := getPostPrimaryAuthor(post)
+	if author == "" {
+		return fmt.Errorf("no valid author found for post: %s", post.Title)
 	}
 
-	actorURL := fmt.Sprintf("%s/@%s", baseURL, username)
+	actorURL := fmt.Sprintf("%s/@%s", baseURL, author)
+
+	// Build attribution for updated post
+	attribution := buildPostAttribution(post, baseURL)
 
 	// Create the updated Article object
 	article := &Article{
@@ -218,11 +224,11 @@ func (os *OutboxService) UpdatePost(post *BlogPost, baseURL string) error {
 			Content:      post.HTMLContent,
 			Summary:      post.Summary,
 			URL:          post.URL,
-			AttributedTo: actorURL,
+			AttributedTo: attribution, // Can be string or []string
 			Published:    post.PublishedAt.Format(time.RFC3339),
 			Updated:      time.Now().Format(time.RFC3339),
 			To:           []string{"https://www.w3.org/ns/activitystreams#Public"},
-			CC:           []string{actorURL + "/followers"},
+			CC:           buildFollowersCC(post, baseURL), // Include all authors' followers
 			Tag:          convertTagsToActivityPub(post.Tags),
 		},
 	}
@@ -235,7 +241,7 @@ func (os *OutboxService) UpdatePost(post *BlogPost, baseURL string) error {
 	}
 
 	// Create the Update activity
-	activityID := GenerateActivityID(baseURL, username)
+	activityID := GenerateActivityID(baseURL, author)
 	updateActivity := &Activity{
 		Context:   ActivityPubContext,
 		ID:        activityID,
@@ -244,16 +250,16 @@ func (os *OutboxService) UpdatePost(post *BlogPost, baseURL string) error {
 		Object:    article,
 		Published: time.Now().Format(time.RFC3339),
 		To:        []string{"https://www.w3.org/ns/activitystreams#Public"},
-		CC:        []string{actorURL + "/followers"},
+		CC:        buildFollowersCC(post, baseURL), // Include all authors' followers
 	}
 
 	// Deliver to followers
-	err := os.deliverToFollowers(updateActivity, username)
+	err := os.deliverToFollowers(updateActivity, author)
 	if err != nil {
 		return fmt.Errorf("failed to deliver update to followers: %w", err)
 	}
 
-	slog.Info("Blog post update published to ActivityPub", "title", post.Title, "url", post.URL, "actor", actorURL)
+	slog.Info("Blog post update published to ActivityPub", "title", post.Title, "url", post.URL, "actor", actorURL, "author", author)
 	return nil
 }
 
@@ -264,15 +270,16 @@ func (os *OutboxService) DeletePost(postURL, repo, baseURL string) error {
 		return nil
 	}
 
-	username := getRepoOwner(repo)
-	if username == "" {
+	// For deletions, we need to look up the original author or fall back to repo owner
+	author := getRepoOwner(repo) // Fallback since we may not have the original post data
+	if author == "" {
 		return fmt.Errorf("no owner configured for repo: %s", repo)
 	}
 
-	actorURL := fmt.Sprintf("%s/@%s", baseURL, username)
+	actorURL := fmt.Sprintf("%s/@%s", baseURL, author)
 
 	// Create the Delete activity
-	activityID := GenerateActivityID(baseURL, username)
+	activityID := GenerateActivityID(baseURL, author)
 	deleteActivity := &Activity{
 		Context:   ActivityPubContext,
 		ID:        activityID,
@@ -281,23 +288,28 @@ func (os *OutboxService) DeletePost(postURL, repo, baseURL string) error {
 		Object:    postURL,
 		Published: time.Now().Format(time.RFC3339),
 		To:        []string{"https://www.w3.org/ns/activitystreams#Public"},
-		CC:        []string{actorURL + "/followers"},
+		CC:        []string{actorURL + "/followers"}, // For deletes, just use the fallback actor
 	}
 
 	// Deliver to followers
-	err := os.deliverToFollowers(deleteActivity, username)
+	err := os.deliverToFollowers(deleteActivity, author)
 	if err != nil {
 		return fmt.Errorf("failed to deliver delete to followers: %w", err)
 	}
 
-	slog.Info("Blog post deletion published to ActivityPub", "url", postURL, "actor", actorURL)
+	slog.Info("Blog post deletion published to ActivityPub", "url", postURL, "actor", actorURL, "author", author)
 	return nil
 }
 
-// deliverToFollowers sends an activity to all followers
+// deliverToFollowers sends an activity to all followers of the specified user
+// For multi-author posts, this should be called for the primary author
 func (os *OutboxService) deliverToFollowers(activity *Activity, username string) error {
-	// Load followers
-	followers, err := os.storage.LoadFollowers()
+	// For multi-author posts, we could potentially deliver to all authors' followers
+	// For now, we deliver to the primary author's followers
+	// TODO: Consider if we want to aggregate followers from all co-authors
+
+	// Load followers for the specified user
+	followers, err := os.storage.LoadFollowers(username)
 	if err != nil {
 		return fmt.Errorf("failed to load followers: %w", err)
 	}
@@ -396,6 +408,7 @@ type BlogPost struct {
 	Summary         string
 	PublishedAt     time.Time
 	Tags            []string
+	Authors         []string // Post authors from frontmatter
 	Repo            string
 	Slug            string
 }
@@ -429,17 +442,111 @@ func isActivityPubEnabledForRepo(repo string) bool {
 }
 
 func getRepoOwner(repo string) string {
-	// Get the owner/primary user for this repo
+	// Get the owner/primary user for this repo (fallback for when we don't have post authors)
 	ownerConfig := fmt.Sprintf("repos.%s.owner", repo)
 	if viper.IsSet(ownerConfig) {
 		return viper.GetString(ownerConfig)
 	}
 
-	// Fallback to first user in users config
+	// Fallback to primary ActivityPub user
+	if primaryUser := viper.GetString("activitypub.primary_user"); primaryUser != "" {
+		users := viper.GetStringMap("users")
+		if _, exists := users[primaryUser]; exists {
+			return primaryUser
+		}
+	}
+
+	// Final fallback to first user in users config
 	users := viper.GetStringMap("users")
 	for username := range users {
 		return username
 	}
 
 	return ""
+}
+
+// getPostPrimaryAuthor gets the primary author for a post, with fallbacks
+func getPostPrimaryAuthor(post *BlogPost) string {
+	// First, try to use the post's actual authors
+	if len(post.Authors) > 0 {
+		primaryAuthor := post.Authors[0] // Use first author as primary
+
+		// Validate the author exists in the users config
+		users := viper.GetStringMap("users")
+		if _, exists := users[primaryAuthor]; exists {
+			return primaryAuthor
+		}
+
+		// If first author doesn't exist, try other authors
+		for _, author := range post.Authors {
+			if _, exists := users[author]; exists {
+				slog.Warn("Primary author not found, using alternate", "primary", primaryAuthor, "using", author, "post", post.Title)
+				return author
+			}
+		}
+
+		slog.Warn("No valid authors found in users config", "authors", post.Authors, "post", post.Title)
+	}
+
+	// Fallback to repo owner if no valid authors found
+	fallback := getRepoOwner(post.Repo)
+	if fallback != "" {
+		slog.Warn("Using repo owner as fallback author", "repo", post.Repo, "owner", fallback, "post", post.Title)
+		return fallback
+	}
+
+	return ""
+}
+
+// buildPostAttribution creates the attribution for a post based on its authors
+func buildPostAttribution(post *BlogPost, baseURL string) interface{} {
+	users := viper.GetStringMap("users")
+	var validAuthors []string
+
+	// Find all valid authors (those that exist in users config)
+	for _, author := range post.Authors {
+		if _, exists := users[author]; exists {
+			validAuthors = append(validAuthors, fmt.Sprintf("%s/@%s", baseURL, author))
+		}
+	}
+
+	// If no valid authors found, fall back to repo owner
+	if len(validAuthors) == 0 {
+		fallbackAuthor := getRepoOwner(post.Repo)
+		if fallbackAuthor != "" {
+			return fmt.Sprintf("%s/@%s", baseURL, fallbackAuthor)
+		}
+		return fmt.Sprintf("%s/@unknown", baseURL) // Last resort
+	}
+
+	// If single author, return as string (more common case)
+	if len(validAuthors) == 1 {
+		return validAuthors[0]
+	}
+
+	// Multiple authors, return as array
+	return validAuthors
+}
+
+// buildFollowersCC creates the CC field including all authors' followers
+func buildFollowersCC(post *BlogPost, baseURL string) []string {
+	users := viper.GetStringMap("users")
+	var cc []string
+
+	// Add followers of each valid author
+	for _, author := range post.Authors {
+		if _, exists := users[author]; exists {
+			cc = append(cc, fmt.Sprintf("%s/@%s/followers", baseURL, author))
+		}
+	}
+
+	// If no valid authors found, fall back to repo owner's followers
+	if len(cc) == 0 {
+		fallbackAuthor := getRepoOwner(post.Repo)
+		if fallbackAuthor != "" {
+			cc = append(cc, fmt.Sprintf("%s/@%s/followers", baseURL, fallbackAuthor))
+		}
+	}
+
+	return cc
 }

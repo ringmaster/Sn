@@ -251,8 +251,8 @@ func (as *ActorService) HandleFollowers(w http.ResponseWriter, r *http.Request) 
 	actorURL := fmt.Sprintf("%s/@%s", baseURL, username)
 	followersURL := actorURL + "/followers"
 
-	// Load followers
-	followers, err := as.storage.LoadFollowers()
+	// Load followers for this user
+	followers, err := as.storage.LoadFollowers(username)
 	if err != nil {
 		slog.Error("Failed to load followers", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -308,8 +308,8 @@ func (as *ActorService) HandleFollowing(w http.ResponseWriter, r *http.Request) 
 	actorURL := fmt.Sprintf("%s/@%s", baseURL, username)
 	followingURL := actorURL + "/following"
 
-	// Load following
-	following, err := as.storage.LoadFollowing()
+	// Load following for this user
+	following, err := as.storage.LoadFollowing(username)
 	if err != nil {
 		slog.Error("Failed to load following", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)

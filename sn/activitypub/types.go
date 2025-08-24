@@ -71,7 +71,7 @@ type Object struct {
 	Content      string      `json:"content,omitempty"`
 	MediaType    string      `json:"mediaType,omitempty"`
 	URL          interface{} `json:"url,omitempty"`
-	AttributedTo string      `json:"attributedTo,omitempty"`
+	AttributedTo interface{} `json:"attributedTo,omitempty"`
 	InReplyTo    string      `json:"inReplyTo,omitempty"`
 	Published    string      `json:"published,omitempty"`
 	Updated      string      `json:"updated,omitempty"`

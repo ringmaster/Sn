@@ -782,7 +782,7 @@ func repoRestPostHandler(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			// Create ActivityPub blog post
+			// Create ActivityPub blog post with author from session
 			blogPost := &activitypub.BlogPost{
 				Title:           payload.Title,
 				URL:             postURL,
@@ -791,6 +791,7 @@ func repoRestPostHandler(w http.ResponseWriter, r *http.Request) {
 				Summary:         "", // TODO: Extract summary if needed
 				PublishedAt:     publishedTime,
 				Tags:            tags,
+				Authors:         []string{username}, // Use session user as author
 				Repo:            payload.Repo,
 				Slug:            payload.Slug,
 			}
@@ -824,7 +825,7 @@ func repoRestPostHandler(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			// Create ActivityPub blog post
+			// Create ActivityPub blog post with author from session
 			blogPost := &activitypub.BlogPost{
 				Title:           payload.Title,
 				URL:             postURL,
@@ -833,6 +834,7 @@ func repoRestPostHandler(w http.ResponseWriter, r *http.Request) {
 				Summary:         "", // TODO: Extract summary if needed
 				PublishedAt:     publishedTime,
 				Tags:            tags,
+				Authors:         []string{username}, // Use session user as author
 				Repo:            payload.Repo,
 				Slug:            payload.Slug,
 			}

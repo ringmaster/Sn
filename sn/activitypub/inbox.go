@@ -16,24 +16,15 @@ type InboxService struct {
 	storage      *Storage
 	keyManager   *KeyManager
 	actorService *ActorService
-	followers    map[string]*Follower
-	following    map[string]*Following
 }
 
 // NewInboxService creates a new inbox service
 func NewInboxService(storage *Storage, keyManager *KeyManager, actorService *ActorService) *InboxService {
-	service := &InboxService{
+	return &InboxService{
 		storage:      storage,
 		keyManager:   keyManager,
 		actorService: actorService,
-		followers:    make(map[string]*Follower),
-		following:    make(map[string]*Following),
 	}
-
-	// Load existing followers and following
-	service.loadFollowData()
-
-	return service
 }
 
 // HandleInbox handles incoming ActivityPub activities
@@ -173,11 +164,17 @@ func (is *InboxService) handleFollow(activity *Activity, username string, r *htt
 		follower.SharedInbox = followerActor.Endpoints.SharedInbox
 	}
 
+	// Load current followers for this user
+	followers, err := is.storage.LoadFollowers(username)
+	if err != nil {
+		return fmt.Errorf("failed to load followers: %w", err)
+	}
+
 	// Add to followers map
-	is.followers[actorID] = follower
+	followers[actorID] = follower
 
 	// Save followers to storage
-	err = is.storage.SaveFollowers(is.followers)
+	err = is.storage.SaveFollowers(username, followers)
 	if err != nil {
 		return fmt.Errorf("failed to save followers: %w", err)
 	}
@@ -211,9 +208,14 @@ func (is *InboxService) handleUndo(activity *Activity, username string, r *http.
 	switch objectType {
 	case TypeFollow:
 		// Handle unfollow
-		if _, exists := is.followers[actorID]; exists {
-			delete(is.followers, actorID)
-			err := is.storage.SaveFollowers(is.followers)
+		followers, err := is.storage.LoadFollowers(username)
+		if err != nil {
+			return fmt.Errorf("failed to load followers: %w", err)
+		}
+
+		if _, exists := followers[actorID]; exists {
+			delete(followers, actorID)
+			err := is.storage.SaveFollowers(username, followers)
 			if err != nil {
 				return fmt.Errorf("failed to save followers after unfollow: %w", err)
 			}
@@ -232,10 +234,16 @@ func (is *InboxService) handleUndo(activity *Activity, username string, r *http.
 func (is *InboxService) handleAccept(activity *Activity, username string, r *http.Request) error {
 	actorID := activity.Actor
 
+	// Load following for this user
+	following, err := is.storage.LoadFollowing(username)
+	if err != nil {
+		return fmt.Errorf("failed to load following: %w", err)
+	}
+
 	// Check if we have a pending follow for this actor
-	if following, exists := is.following[actorID]; exists {
-		following.FollowedAt = time.Now()
-		err := is.storage.SaveFollowing(is.following)
+	if followingRecord, exists := following[actorID]; exists {
+		followingRecord.FollowedAt = time.Now()
+		err := is.storage.SaveFollowing(username, following)
 		if err != nil {
 			return fmt.Errorf("failed to save following after accept: %w", err)
 		}
@@ -249,10 +257,16 @@ func (is *InboxService) handleAccept(activity *Activity, username string, r *htt
 func (is *InboxService) handleReject(activity *Activity, username string, r *http.Request) error {
 	actorID := activity.Actor
 
+	// Load following for this user
+	following, err := is.storage.LoadFollowing(username)
+	if err != nil {
+		return fmt.Errorf("failed to load following: %w", err)
+	}
+
 	// Remove from following if we were trying to follow them
-	if _, exists := is.following[actorID]; exists {
-		delete(is.following, actorID)
-		err := is.storage.SaveFollowing(is.following)
+	if _, exists := following[actorID]; exists {
+		delete(following, actorID)
+		err := is.storage.SaveFollowing(username, following)
 		if err != nil {
 			return fmt.Errorf("failed to save following after reject: %w", err)
 		}
@@ -413,22 +427,6 @@ func (is *InboxService) handleAnnounce(activity *Activity, username string, r *h
 }
 
 // Helper functions
-
-func (is *InboxService) loadFollowData() {
-	followers, err := is.storage.LoadFollowers()
-	if err != nil {
-		slog.Error("Failed to load followers", "error", err)
-	} else {
-		is.followers = followers
-	}
-
-	following, err := is.storage.LoadFollowing()
-	if err != nil {
-		slog.Error("Failed to load following", "error", err)
-	} else {
-		is.following = following
-	}
-}
 
 func (is *InboxService) verifyIncomingSignature(r *http.Request, body []byte) error {
 	// Parse signature header to extract key ID

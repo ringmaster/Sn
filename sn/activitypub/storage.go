@@ -230,6 +230,7 @@ func (s *Storage) ensureDirectories() error {
 		".activitypub",
 		".activitypub/queue",
 		".activitypub/comments",
+		".activitypub/users",
 	}
 
 	for _, dir := range dirs {
@@ -242,14 +243,21 @@ func (s *Storage) ensureDirectories() error {
 	return nil
 }
 
-// SaveFollowers saves the followers list to storage
-func (s *Storage) SaveFollowers(followers map[string]*Follower) error {
+// SaveFollowers saves the followers list for a specific user to storage
+func (s *Storage) SaveFollowers(username string, followers map[string]*Follower) error {
 	data, err := json.MarshalIndent(followers, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal followers: %w", err)
 	}
 
-	err = afero.WriteFile(s.activityPubFs, ".activitypub/followers.json", data, 0644)
+	// Create user-specific followers directory
+	userDir := path.Join(".activitypub/users", username)
+	err = s.activityPubFs.MkdirAll(userDir, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to create user directory: %w", err)
+	}
+
+	err = afero.WriteFile(s.activityPubFs, path.Join(userDir, "followers.json"), data, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write followers file: %w", err)
 	}
@@ -258,11 +266,12 @@ func (s *Storage) SaveFollowers(followers map[string]*Follower) error {
 	return nil
 }
 
-// LoadFollowers loads the followers list from storage
-func (s *Storage) LoadFollowers() (map[string]*Follower, error) {
+// LoadFollowers loads the followers list for a specific user from storage
+func (s *Storage) LoadFollowers(username string) (map[string]*Follower, error) {
 	followers := make(map[string]*Follower)
 
-	exists, err := afero.Exists(s.activityPubFs, ".activitypub/followers.json")
+	userFollowersFile := path.Join(".activitypub/users", username, "followers.json")
+	exists, err := afero.Exists(s.activityPubFs, userFollowersFile)
 	if err != nil {
 		return followers, fmt.Errorf("failed to check if followers file exists: %w", err)
 	}
@@ -271,7 +280,7 @@ func (s *Storage) LoadFollowers() (map[string]*Follower, error) {
 		return followers, nil
 	}
 
-	data, err := afero.ReadFile(s.activityPubFs, ".activitypub/followers.json")
+	data, err := afero.ReadFile(s.activityPubFs, userFollowersFile)
 	if err != nil {
 		return followers, fmt.Errorf("failed to read followers file: %w", err)
 	}
@@ -284,14 +293,21 @@ func (s *Storage) LoadFollowers() (map[string]*Follower, error) {
 	return followers, nil
 }
 
-// SaveFollowing saves the following list to storage
-func (s *Storage) SaveFollowing(following map[string]*Following) error {
+// SaveFollowing saves the following list for a specific user to storage
+func (s *Storage) SaveFollowing(username string, following map[string]*Following) error {
 	data, err := json.MarshalIndent(following, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal following: %w", err)
 	}
 
-	err = afero.WriteFile(s.activityPubFs, ".activitypub/following.json", data, 0644)
+	// Create user-specific following directory
+	userDir := path.Join(".activitypub/users", username)
+	err = s.activityPubFs.MkdirAll(userDir, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to create user directory: %w", err)
+	}
+
+	err = afero.WriteFile(s.activityPubFs, path.Join(userDir, "following.json"), data, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write following file: %w", err)
 	}
@@ -300,11 +316,12 @@ func (s *Storage) SaveFollowing(following map[string]*Following) error {
 	return nil
 }
 
-// LoadFollowing loads the following list from storage
-func (s *Storage) LoadFollowing() (map[string]*Following, error) {
+// LoadFollowing loads the following list for a specific user from storage
+func (s *Storage) LoadFollowing(username string) (map[string]*Following, error) {
 	following := make(map[string]*Following)
 
-	exists, err := afero.Exists(s.activityPubFs, ".activitypub/following.json")
+	userFollowingFile := path.Join(".activitypub/users", username, "following.json")
+	exists, err := afero.Exists(s.activityPubFs, userFollowingFile)
 	if err != nil {
 		return following, fmt.Errorf("failed to check if following file exists: %w", err)
 	}
@@ -313,7 +330,7 @@ func (s *Storage) LoadFollowing() (map[string]*Following, error) {
 		return following, nil
 	}
 
-	data, err := afero.ReadFile(s.activityPubFs, ".activitypub/following.json")
+	data, err := afero.ReadFile(s.activityPubFs, userFollowingFile)
 	if err != nil {
 		return following, fmt.Errorf("failed to read following file: %w", err)
 	}

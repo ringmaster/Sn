@@ -6,24 +6,24 @@ import (
 
 // Actor represents an ActivityPub actor
 type Actor struct {
-	Context                   []string   `json:"@context"`
-	ID                        string     `json:"id"`
-	Type                      string     `json:"type"`
-	Name                      string     `json:"name,omitempty"`
-	PreferredUsername         string     `json:"preferredUsername"`
-	Summary                   string     `json:"summary,omitempty"`
-	URL                       string     `json:"url,omitempty"`
-	Icon                      *Image     `json:"icon,omitempty"`
-	Image                     *Image     `json:"image,omitempty"`
-	ManuallyApprovesFollowers bool       `json:"manuallyApprovesFollowers"`
-	Discoverable              bool       `json:"discoverable"`
-	PublicKey                 *PublicKey `json:"publicKey"`
-	Inbox                     string     `json:"inbox"`
-	Outbox                    string     `json:"outbox"`
-	Following                 string     `json:"following,omitempty"`
-	Followers                 string     `json:"followers,omitempty"`
-	Endpoints                 *Endpoints `json:"endpoints,omitempty"`
-	Published                 string     `json:"published,omitempty"`
+	Context                   interface{} `json:"@context"`
+	ID                        string      `json:"id"`
+	Type                      string      `json:"type"`
+	Name                      string      `json:"name,omitempty"`
+	PreferredUsername         string      `json:"preferredUsername"`
+	Summary                   string      `json:"summary,omitempty"`
+	URL                       string      `json:"url,omitempty"`
+	Icon                      *Image      `json:"icon,omitempty"`
+	Image                     *Image      `json:"image,omitempty"`
+	ManuallyApprovesFollowers bool        `json:"manuallyApprovesFollowers"`
+	Discoverable              bool        `json:"discoverable"`
+	PublicKey                 *PublicKey  `json:"publicKey"`
+	Inbox                     string      `json:"inbox"`
+	Outbox                    string      `json:"outbox"`
+	Following                 string      `json:"following,omitempty"`
+	Followers                 string      `json:"followers,omitempty"`
+	Endpoints                 *Endpoints  `json:"endpoints,omitempty"`
+	Published                 string      `json:"published,omitempty"`
 }
 
 // PublicKey represents an ActivityPub public key
@@ -48,7 +48,7 @@ type Endpoints struct {
 
 // Activity represents a generic ActivityPub activity
 type Activity struct {
-	Context   []string    `json:"@context"`
+	Context   interface{} `json:"@context"`
 	ID        string      `json:"id"`
 	Type      string      `json:"type"`
 	Actor     string      `json:"actor"`
@@ -63,7 +63,7 @@ type Activity struct {
 
 // Object represents a generic ActivityPub object
 type Object struct {
-	Context      []string    `json:"@context,omitempty"`
+	Context      interface{} `json:"@context,omitempty"`
 	ID           string      `json:"id"`
 	Type         string      `json:"type"`
 	Name         string      `json:"name,omitempty"`
@@ -110,7 +110,7 @@ type Tag struct {
 
 // Collection represents an ActivityPub collection
 type Collection struct {
-	Context      []string    `json:"@context,omitempty"`
+	Context      interface{} `json:"@context,omitempty"`
 	ID           string      `json:"id"`
 	Type         string      `json:"type"`
 	Name         string      `json:"name,omitempty"`
@@ -125,16 +125,16 @@ type Collection struct {
 
 // CollectionPage represents a page within an ActivityPub collection
 type CollectionPage struct {
-	Context      []string `json:"@context,omitempty"`
-	ID           string   `json:"id"`
-	Type         string   `json:"type"`
-	Name         string   `json:"name,omitempty"`
-	Summary      string   `json:"summary,omitempty"`
-	PartOf       string   `json:"partOf"`
-	Next         string   `json:"next,omitempty"`
-	Prev         string   `json:"prev,omitempty"`
-	Items        []string `json:"items,omitempty"`
-	OrderedItems []string `json:"orderedItems,omitempty"`
+	Context      interface{} `json:"@context,omitempty"`
+	ID           string      `json:"id"`
+	Type         string      `json:"type"`
+	Name         string      `json:"name,omitempty"`
+	Summary      string      `json:"summary,omitempty"`
+	PartOf       string      `json:"partOf"`
+	Next         string      `json:"next,omitempty"`
+	Prev         string      `json:"prev,omitempty"`
+	Items        []string    `json:"items,omitempty"`
+	OrderedItems []string    `json:"orderedItems,omitempty"`
 }
 
 // Follower represents a follower in our storage

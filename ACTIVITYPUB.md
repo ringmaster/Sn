@@ -686,8 +686,12 @@ activitypub:
 ### Federation Issues
 
 1. **HTTP Signatures**: Check logs for signature verification errors
-2. **Network**: Ensure your server is reachable from the internet
-3. **SSL/TLS**: ActivityPub requires HTTPS in production
+3. **ActivityPub Compatibility Issues**: `cannot unmarshal object into Go struct field Actor.@context` error
+   - Remote servers sending different `@context` formats (object vs array)
+   - This has been fixed in recent versions - update your Sn binary
+   - The application now accepts flexible ActivityPub JSON formats
+4. **Network**: Ensure your server is reachable from the internet
+5. **SSL/TLS**: ActivityPub requires HTTPS in production
 
 ### Performance Considerations
 

@@ -1,6 +1,7 @@
 package activitypub
 
 import (
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -23,7 +24,7 @@ type Manager struct {
 }
 
 // NewManager creates a new ActivityPub manager
-func NewManager(mainFs afero.Fs) (*Manager, error) {
+func NewManager(mainFs afero.Fs, db *sql.DB) (*Manager, error) {
 	// Check if ActivityPub is enabled
 	enabled := viper.GetBool("activitypub.enabled")
 	if !enabled {
@@ -76,7 +77,7 @@ func NewManager(mainFs afero.Fs) (*Manager, error) {
 	// Initialize services
 	actorService := NewActorService(storage, keyManager)
 	inboxService := NewInboxService(storage, keyManager, actorService)
-	outboxService := NewOutboxService(storage, keyManager, actorService, inboxService)
+	outboxService := NewOutboxService(storage, keyManager, actorService, inboxService, db)
 
 	manager := &Manager{
 		storage:       storage,
@@ -139,6 +140,11 @@ func (m *Manager) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/@{username}/outbox", m.outboxService.HandleOutbox).
 		Methods("GET").
 		Name("activitypub-outbox")
+
+	// Server-wide outbox for aggregated content
+	router.HandleFunc("/outbox", m.outboxService.HandleServerOutbox).
+		Methods("GET").
+		Name("activitypub-server-outbox")
 
 	// Followers collection
 	router.HandleFunc("/@{username}/followers", m.actorService.HandleFollowers).

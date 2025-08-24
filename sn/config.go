@@ -101,14 +101,18 @@ func ConfigSetup() (afero.Fs, error) {
 
 	fmt.Printf("The passwordhash for the user test from the config is: %#q\n", viper.GetString("users.test.passwordhash"))
 
-	// Initialize ActivityPub manager
-	ActivityPubManager, err = activitypub.NewManager(Vfs)
+	return Vfs, nil
+}
+
+// InitializeActivityPub initializes the ActivityPub manager after database connection
+func InitializeActivityPub() error {
+	var err error
+	ActivityPubManager, err = activitypub.NewManager(Vfs, db)
 	if err != nil {
 		slog.Error(fmt.Sprintf("Failed to initialize ActivityPub: %v", err))
-		return nil, err
+		return err
 	}
-
-	return Vfs, nil
+	return nil
 }
 
 // ForceRegenerateActivityPubKeys forces regeneration of ActivityPub keys

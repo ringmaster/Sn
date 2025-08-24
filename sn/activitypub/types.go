@@ -125,16 +125,16 @@ type Collection struct {
 
 // CollectionPage represents a page within an ActivityPub collection
 type CollectionPage struct {
-	Context      interface{} `json:"@context,omitempty"`
-	ID           string      `json:"id"`
-	Type         string      `json:"type"`
-	Name         string      `json:"name,omitempty"`
-	Summary      string      `json:"summary,omitempty"`
-	PartOf       string      `json:"partOf"`
-	Next         string      `json:"next,omitempty"`
-	Prev         string      `json:"prev,omitempty"`
-	Items        []string    `json:"items,omitempty"`
-	OrderedItems []string    `json:"orderedItems,omitempty"`
+	Context      interface{}   `json:"@context,omitempty"`
+	ID           string        `json:"id"`
+	Type         string        `json:"type"`
+	Name         string        `json:"name,omitempty"`
+	Summary      string        `json:"summary,omitempty"`
+	PartOf       string        `json:"partOf"`
+	Next         string        `json:"next,omitempty"`
+	Prev         string        `json:"prev,omitempty"`
+	Items        []string      `json:"items,omitempty"`
+	OrderedItems []interface{} `json:"orderedItems,omitempty"`
 }
 
 // Follower represents a follower in our storage

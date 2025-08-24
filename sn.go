@@ -39,6 +39,13 @@ func serve() {
 		sn.DBConnect()
 		defer sn.DBClose()
 
+		// Initialize ActivityPub after database connection
+		err = sn.InitializeActivityPub()
+		if err != nil {
+			slog.Error(fmt.Sprintf("Error while initializing ActivityPub: %v", err))
+			return
+		}
+
 		// Set up ActivityPub cleanup
 		defer func() {
 			if sn.ActivityPubManager != nil {

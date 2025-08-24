@@ -87,6 +87,20 @@ func (is *InboxService) HandleInbox(w http.ResponseWriter, r *http.Request) {
 	// Extract username from URL path
 	username := extractUsernameFromInboxPath(r.URL.Path)
 	if username == "" {
+		// Check if this is a shared inbox request
+		if r.URL.Path == "/inbox" {
+			slog.Info("Processing shared inbox request", "path", r.URL.Path)
+			// For shared inbox, we need to determine the target user from the activity
+			err = is.processSharedInboxActivity(&activity, r)
+			if err != nil {
+				slog.Error("Failed to process shared inbox activity", "error", err)
+				http.Error(w, "Failed to process activity", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+			slog.Info("Shared inbox activity processed successfully", "type", activity.Type, "actor", activity.Actor)
+			return
+		}
 		slog.Error("Could not extract username from inbox path", "path", r.URL.Path)
 		http.Error(w, "Invalid inbox path", http.StatusBadRequest)
 		return
@@ -637,4 +651,60 @@ func generateCommentID(originalID string) string {
 	// Create a consistent ID for the comment
 	// Use hash of original ID to ensure uniqueness
 	return fmt.Sprintf("comment-%x", time.Now().UnixNano())
+}
+
+// processSharedInboxActivity processes activities sent to the shared inbox
+func (is *InboxService) processSharedInboxActivity(activity *Activity, r *http.Request) error {
+	slog.Info("Processing shared inbox activity", "type", activity.Type, "actor", activity.Actor)
+
+	// For shared inbox, we need to determine which user this activity is intended for
+	// This is typically done by examining the activity's object
+	var targetUsername string
+
+	switch activity.Type {
+	case TypeFollow:
+		// Extract username from the object being followed
+		if objectStr, ok := activity.Object.(string); ok {
+			// Expected format: http://domain/@username
+			if strings.Contains(objectStr, "/@") {
+				parts := strings.Split(objectStr, "/@")
+				if len(parts) == 2 {
+					targetUsername = parts[1]
+				}
+			}
+		}
+	case TypeUndo:
+		// For Undo activities, check the nested object
+		if objectMap, ok := activity.Object.(map[string]interface{}); ok {
+			if objectType, ok := objectMap["type"].(string); ok && objectType == "Follow" {
+				if objectStr, ok := objectMap["object"].(string); ok {
+					if strings.Contains(objectStr, "/@") {
+						parts := strings.Split(objectStr, "/@")
+						if len(parts) == 2 {
+							targetUsername = parts[1]
+						}
+					}
+				}
+			}
+		}
+	default:
+		slog.Info("Shared inbox activity type not specifically handled", "type", activity.Type)
+		return nil
+	}
+
+	if targetUsername == "" {
+		slog.Warn("Could not determine target user for shared inbox activity", "type", activity.Type, "object", activity.Object)
+		return nil // Don't error, just ignore
+	}
+
+	// Validate the target user exists
+	if !userExists(targetUsername) {
+		slog.Warn("Shared inbox activity for non-existent user", "username", targetUsername, "type", activity.Type)
+		return nil // Don't error, just ignore
+	}
+
+	slog.Info("Routing shared inbox activity to user", "username", targetUsername, "type", activity.Type)
+
+	// Process the activity as if it came to the user's personal inbox
+	return is.processActivity(activity, targetUsername, r)
 }

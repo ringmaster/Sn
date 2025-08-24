@@ -1,6 +1,7 @@
 package activitypub
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -18,15 +19,17 @@ type OutboxService struct {
 	keyManager   *KeyManager
 	actorService *ActorService
 	inboxService *InboxService
+	db           *sql.DB
 }
 
 // NewOutboxService creates a new outbox service
-func NewOutboxService(storage *Storage, keyManager *KeyManager, actorService *ActorService, inboxService *InboxService) *OutboxService {
+func NewOutboxService(storage *Storage, keyManager *KeyManager, actorService *ActorService, inboxService *InboxService, db *sql.DB) *OutboxService {
 	return &OutboxService{
 		storage:      storage,
 		keyManager:   keyManager,
 		actorService: actorService,
 		inboxService: inboxService,
+		db:           db,
 	}
 }
 
@@ -388,15 +391,301 @@ func (os *OutboxService) deliverToInbox(inboxURL string, activityJSON []byte) er
 // Helper functions for outbox implementation
 
 func (os *OutboxService) getTotalPublishedActivities(username string) int {
-	// This would query your database/storage for the count of published activities
+	// Query database for total count of posts by this author from ActivityPub-enabled repos
+	var count int
+
+	// Build SQL to count items where:
+	// 1. Author matches username
+	// 2. Repo has ActivityPub enabled
+	repos := viper.GetStringMap("repos")
+	var activityPubRepos []string
+	for repoName := range repos {
+		if isActivityPubEnabledForRepo(repoName) {
+			activityPubRepos = append(activityPubRepos, repoName)
+		}
+	}
+
+	if len(activityPubRepos) == 0 {
+		return 0
+	}
+
+	// Create placeholders for IN clause
+	placeholders := strings.Repeat("?,", len(activityPubRepos))
+	placeholders = placeholders[:len(placeholders)-1] // Remove trailing comma
+
+	sql := fmt.Sprintf(`
+		SELECT COUNT(DISTINCT items.id)
+		FROM items
+		LEFT JOIN items_authors ON items.id = items_authors.item_id
+		LEFT JOIN authors ON authors.id = items_authors.author_id
+		WHERE authors.author = ? AND items.repo IN (%s)
+	`, placeholders)
+
+	// Prepare arguments: username + repo names
+	args := make([]interface{}, len(activityPubRepos)+1)
+	args[0] = username
+	for i, repo := range activityPubRepos {
+		args[i+1] = repo
+	}
+
+	err := os.db.QueryRow(sql, args...).Scan(&count)
+	if err != nil {
+		slog.Error("Failed to count published activities", "username", username, "error", err)
+		return 0
+	}
+
+	slog.Info("Counted published activities", "username", username, "count", count)
+	return count
+}
+
+func (os *OutboxService) getActivitiesForPage(username string, pageNum int) []interface{} {
+	const itemsPerPage = 20
+	offset := (pageNum - 1) * itemsPerPage
+
+	// Query database for posts by this author from ActivityPub-enabled repos
+	repos := viper.GetStringMap("repos")
+	var activityPubRepos []string
+	for repoName := range repos {
+		if isActivityPubEnabledForRepo(repoName) {
+			activityPubRepos = append(activityPubRepos, repoName)
+		}
+	}
+
+	if len(activityPubRepos) == 0 {
+		return []interface{}{}
+	}
+
+	// Create placeholders for IN clause
+	placeholders := strings.Repeat("?,", len(activityPubRepos))
+	placeholders = placeholders[:len(placeholders)-1] // Remove trailing comma
+
+	sql := fmt.Sprintf(`
+		SELECT DISTINCT items.id, items.repo, items.title, items.slug, items.publishedon, items.html, items.source
+		FROM items
+		LEFT JOIN items_authors ON items.id = items_authors.item_id
+		LEFT JOIN authors ON authors.id = items_authors.author_id
+		WHERE authors.author = ? AND items.repo IN (%s)
+		ORDER BY items.publishedon DESC
+		LIMIT ? OFFSET ?
+	`, placeholders)
+
+	// Prepare arguments: username + repo names + limit + offset
+	args := make([]interface{}, len(activityPubRepos)+3)
+	args[0] = username
+	for i, repo := range activityPubRepos {
+		args[i+1] = repo
+	}
+	args[len(activityPubRepos)+1] = itemsPerPage
+	args[len(activityPubRepos)+2] = offset
+
+	rows, err := os.db.Query(sql, args...)
+	if err != nil {
+		slog.Error("Failed to query published activities", "username", username, "error", err)
+		return []interface{}{}
+	}
+	defer rows.Close()
+
+	var activities []interface{}
+	baseURL := getBaseURL()
+
+	for rows.Next() {
+		var id int64
+		var repo, title, slug, publishedon, html, source string
+
+		err := rows.Scan(&id, &repo, &title, &slug, &publishedon, &html, &source)
+		if err != nil {
+			slog.Error("Failed to scan activity row", "error", err)
+			continue
+		}
+
+		// Get authors for this post
+		authorRows, err := os.db.Query("SELECT author FROM authors INNER JOIN items_authors ON items_authors.author_id = authors.id WHERE items_authors.item_id = ?", id)
+		if err != nil {
+			slog.Error("Failed to query post authors", "postId", id, "error", err)
+			continue
+		}
+
+		var authors []string
+		for authorRows.Next() {
+			var author string
+			if err := authorRows.Scan(&author); err == nil {
+				authors = append(authors, author)
+			}
+		}
+		authorRows.Close()
+
+		// Get categories/tags for this post
+		tagRows, err := os.db.Query("SELECT category FROM categories INNER JOIN items_categories ON items_categories.category_id = categories.id WHERE items_categories.item_id = ?", id)
+		if err != nil {
+			slog.Error("Failed to query post tags", "postId", id, "error", err)
+			continue
+		}
+
+		var tags []string
+		for tagRows.Next() {
+			var tag string
+			if err := tagRows.Scan(&tag); err == nil {
+				tags = append(tags, tag)
+			}
+		}
+		tagRows.Close()
+
+		// Parse published date
+		publishedTime, err := time.Parse("2006-01-02 15:04:05", publishedon)
+		if err != nil {
+			slog.Warn("Failed to parse published date", "date", publishedon, "error", err)
+			publishedTime = time.Now()
+		}
+
+		// Create ActivityPub Article object
+		postURL := fmt.Sprintf("%s/posts/%s", baseURL, slug)
+		actorURL := fmt.Sprintf("%s/@%s", baseURL, username)
+
+		// Build attribution for multiple authors
+		var attribution interface{}
+		if len(authors) == 1 {
+			attribution = fmt.Sprintf("%s/@%s", baseURL, authors[0])
+		} else if len(authors) > 1 {
+			var authorURLs []string
+			for _, author := range authors {
+				authorURLs = append(authorURLs, fmt.Sprintf("%s/@%s", baseURL, author))
+			}
+			attribution = authorURLs
+		} else {
+			attribution = actorURL
+		}
+
+		article := map[string]interface{}{
+			"@context":     ActivityPubContext,
+			"id":           postURL,
+			"type":         "Article",
+			"name":         title,
+			"content":      html,
+			"attributedTo": attribution,
+			"published":    publishedTime.Format(time.RFC3339),
+			"url":          postURL,
+			"tag":          tags,
+		}
+
+		// Create Create activity wrapping the Article
+		createActivity := map[string]interface{}{
+			"@context":  ActivityPubContext,
+			"id":        fmt.Sprintf("%s/activities/%s", baseURL, slug),
+			"type":      "Create",
+			"actor":     actorURL,
+			"object":    article,
+			"published": publishedTime.Format(time.RFC3339),
+			"to":        []string{"https://www.w3.org/ns/activitystreams#Public"},
+			"cc":        []string{fmt.Sprintf("%s/@%s/followers", baseURL, username)},
+		}
+
+		activities = append(activities, createActivity)
+	}
+
+	slog.Info("Retrieved published activities", "username", username, "page", pageNum, "count", len(activities))
+	return activities
+}
+
+// HandleServerOutbox handles server-wide outbox collection requests for all ActivityPub-enabled repos
+func (os *OutboxService) HandleServerOutbox(w http.ResponseWriter, r *http.Request) {
+	slog.Info("Server outbox request received", "path", r.URL.Path, "remote_addr", r.RemoteAddr)
+
+	// Check if ActivityPub is enabled
+	if !isActivityPubEnabled() {
+		http.Error(w, "ActivityPub not enabled", http.StatusNotFound)
+		return
+	}
+
+	baseURL := GetBaseURL(r)
+	outboxURL := baseURL + "/outbox"
+
+	// Check for page parameter
+	page := r.URL.Query().Get("page")
+	if page == "" {
+		// Return server outbox collection summary
+		os.handleServerOutboxCollection(w, outboxURL)
+		return
+	}
+
+	// Parse page number
+	pageNum, err := strconv.Atoi(page)
+	if err != nil || pageNum < 1 {
+		http.Error(w, "Invalid page number", http.StatusBadRequest)
+		return
+	}
+
+	os.handleServerOutboxPage(w, outboxURL, pageNum)
+}
+
+// handleServerOutboxCollection returns the server outbox collection summary
+func (os *OutboxService) handleServerOutboxCollection(w http.ResponseWriter, outboxURL string) {
+	// Get total count of published activities across all ActivityPub-enabled repos
+	totalItems := os.getTotalServerActivities()
+
+	collection := &Collection{
+		Context:    ActivityPubContext,
+		ID:         outboxURL,
+		Type:       TypeOrderedCollection,
+		TotalItems: totalItems,
+		First:      outboxURL + "?page=1",
+	}
+
+	w.Header().Set("Content-Type", "application/activity+json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(collection)
+	slog.Info("Server outbox collection request handled", "totalItems", totalItems)
+}
+
+// handleServerOutboxPage returns a specific page of server outbox items
+func (os *OutboxService) handleServerOutboxPage(w http.ResponseWriter, outboxURL string, pageNum int) {
+	// Get activities for this page across all ActivityPub-enabled repos
+	activities := os.getServerActivitiesForPage(pageNum)
+
+	pageURL := fmt.Sprintf("%s?page=%d", outboxURL, pageNum)
+
+	page := &CollectionPage{
+		Context:      ActivityPubContext,
+		ID:           pageURL,
+		Type:         TypeOrderedCollectionPage,
+		PartOf:       outboxURL,
+		OrderedItems: activities,
+	}
+
+	// Add navigation links if needed
+	if pageNum > 1 {
+		page.Prev = fmt.Sprintf("%s?page=%d", outboxURL, pageNum-1)
+	}
+	if len(activities) >= 20 { // Assuming 20 items per page
+		page.Next = fmt.Sprintf("%s?page=%d", outboxURL, pageNum+1)
+	}
+
+	w.Header().Set("Content-Type", "application/activity+json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(page)
+	slog.Info("Server outbox page request handled", "page", pageNum, "items", len(activities))
+}
+
+// getTotalServerActivities returns the total count of published activities across all ActivityPub-enabled repos
+func (os *OutboxService) getTotalServerActivities() int {
+	// TODO: Implement actual counting logic that:
+	// 1. Iterates through all configured repos
+	// 2. Checks if each repo has ActivityPub enabled
+	// 3. Counts published articles/activities from those repos
 	// For now, return 0 as placeholder
+	slog.Info("Getting total server activities count", "placeholder", true)
 	return 0
 }
 
-func (os *OutboxService) getActivitiesForPage(username string, pageNum int) []string {
-	// This would query your database/storage for activities on this page
+// getServerActivitiesForPage returns activities for a page across all ActivityPub-enabled repos
+func (os *OutboxService) getServerActivitiesForPage(pageNum int) []interface{} {
+	// TODO: Implement actual query logic that:
+	// 1. Gets all repos with ActivityPub enabled
+	// 2. Queries published articles from those repos
+	// 3. Converts them to ActivityPub Article objects
+	// 4. Returns the appropriate page of results
 	// For now, return empty slice as placeholder
-	return []string{}
+	slog.Info("Getting server activities for page", "page", pageNum, "placeholder", true)
+	return []interface{}{}
 }
 
 // BlogPost represents a blog post for ActivityPub publishing

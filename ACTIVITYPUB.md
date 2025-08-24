@@ -640,16 +640,45 @@ activitypub:
    - Set `activitypub.master_key` in config or `SN_ACTIVITYPUB__MASTER_KEY` env var
    - Application won't start without this value when ActivityPub is enabled
 
-2. **Key Decryption Failed**: `failed to decrypt keys` error
+2. **Base64 Decoding Error**: `failed to decode base64: illegal base64 data` error
+   - Corrupted or incompatible keys.json file from previous version
+   - **Quick Fix**: Delete corrupted keys file: `rm .activitypub/keys.json`
+   - **Alternative**: Use command: `./sn regen-keys`
+   - Restart Sn to generate new encrypted keys
+   - **Note**: Existing followers will need to re-follow your accounts
+
+3. **Key Decryption Failed**: `failed to decrypt keys` error
    - Master key changed but existing encrypted keys.json exists
+   - Wrong master key being used for existing encrypted file
    - Delete `.activitypub/keys.json` to regenerate with new master key
    - Or restore original master key value
 
-3. **Key Generation Failed**: `failed to generate RSA key` error
+4. **Keys File Corrupted**: `keys file corrupted` error
+   - File became corrupted or partially written
+   - **Quick Recovery**: Use the provided recovery script:
+     ```bash
+     ./scripts/recover-activitypub-keys.sh
+     ```
+   - **Manual Recovery Steps**:
+     ```bash
+     # Backup existing data
+     cp -r .activitypub activitypub-backup-$(date +%Y%m%d)
+
+     # Remove corrupted file
+     rm .activitypub/keys.json
+
+     # Or use built-in command
+     ./sn regen-keys
+
+     # Then restart
+     ./sn serve
+     ```
+
+5. **Key Generation Failed**: `failed to generate RSA key` error
    - Insufficient system entropy - restart and try again
    - Check system permissions for random number generation
 
-4. **File Permission Issues**: Can't read/write keys.json
+6. **File Permission Issues**: Can't read/write keys.json
    - Ensure `.activitypub/` directory has proper permissions
    - Keys file should be 0600 (owner read/write only)
 

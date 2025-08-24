@@ -399,19 +399,52 @@ func (s *Storage) LoadKeys() (*KeyPair, error) {
 		return nil, fmt.Errorf("failed to read keys file: %w", err)
 	}
 
-	// Decrypt the keys data
+	// Try to decrypt the keys data (new format)
 	data, err := s.decrypt(encryptedData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt keys: %w", err)
+		// If decryption fails, try parsing as plain JSON (legacy format)
+		slog.Warn("Failed to decrypt keys, attempting to read as plain JSON (legacy format)", "error", err)
+
+		var keys KeyPair
+		err = json.Unmarshal(encryptedData, &keys)
+		if err != nil {
+			// File is corrupted - offer recovery option
+			slog.Error("Keys file appears to be corrupted and cannot be read", "error", err)
+			slog.Error("To recover, you can:")
+			slog.Error("1. Delete the corrupted keys file: rm .activitypub/keys.json")
+			slog.Error("2. Restart Sn to generate new keys (existing followers will need to re-follow)")
+			slog.Error("3. Or restore from backup if available")
+			return nil, fmt.Errorf("keys file corrupted - see logs for recovery options: %w", err)
+		}
+
+		// Successfully read legacy format - migrate to encrypted format
+		slog.Info("Migrating plain-text keys to encrypted format")
+		err = s.SaveKeys(&keys)
+		if err != nil {
+			slog.Error("Failed to migrate keys to encrypted format", "error", err)
+			// Return the keys anyway since we successfully read them
+		}
+
+		return &keys, nil
 	}
 
 	var keys KeyPair
 	err = json.Unmarshal(data, &keys)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal keys: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal decrypted keys: %w", err)
 	}
 
 	return &keys, nil
+}
+
+// DeleteKeys removes the keys file (useful for recovery from corruption)
+func (s *Storage) DeleteKeys() error {
+	err := s.activityPubFs.Remove(".activitypub/keys.json")
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete keys file: %w", err)
+	}
+	slog.Info("Deleted ActivityPub keys file - new keys will be generated on next use")
+	return nil
 }
 
 // SaveMetadata saves federation metadata to storage
@@ -669,11 +702,16 @@ func (s *Storage) encrypt(data []byte) ([]byte, error) {
 
 // decrypt decrypts data using AES-GCM with the master key
 func (s *Storage) decrypt(encodedData []byte) ([]byte, error) {
+	// Check if data looks like base64
+	if len(encodedData) == 0 {
+		return nil, fmt.Errorf("empty data")
+	}
+
 	// Base64 decode
 	ciphertext := make([]byte, base64.StdEncoding.DecodedLen(len(encodedData)))
 	n, err := base64.StdEncoding.Decode(ciphertext, encodedData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode base64: %w", err)
+		return nil, fmt.Errorf("failed to decode base64 - data may be plain text: %w", err)
 	}
 	ciphertext = ciphertext[:n]
 
@@ -689,13 +727,13 @@ func (s *Storage) decrypt(encodedData []byte) ([]byte, error) {
 
 	nonceSize := gcm.NonceSize()
 	if len(ciphertext) < nonceSize {
-		return nil, fmt.Errorf("ciphertext too short")
+		return nil, fmt.Errorf("ciphertext too short - expected at least %d bytes, got %d", nonceSize, len(ciphertext))
 	}
 
 	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
 	data, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt: %w", err)
+		return nil, fmt.Errorf("failed to decrypt - wrong master key or corrupted data: %w", err)
 	}
 
 	return data, nil

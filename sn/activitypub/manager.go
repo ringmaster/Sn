@@ -42,6 +42,15 @@ func NewManager(mainFs afero.Fs) (*Manager, error) {
 	// Initialize storage
 	storage, err := NewStorage(mainFs)
 	if err != nil {
+		// Check if this is a key-related error and provide recovery guidance
+		if strings.Contains(err.Error(), "failed to decrypt keys") || strings.Contains(err.Error(), "keys file corrupted") {
+			slog.Error("ActivityPub keys file appears to be corrupted or from an incompatible version")
+			slog.Error("To recover:")
+			slog.Error("1. Delete the corrupted keys: rm .activitypub/keys.json")
+			slog.Error("2. Restart Sn to generate new encrypted keys")
+			slog.Error("3. Note: Existing followers will need to re-follow your accounts")
+			return nil, fmt.Errorf("ActivityPub keys corrupted - see logs for recovery steps: %w", err)
+		}
 		return nil, fmt.Errorf("failed to initialize ActivityPub storage: %w", err)
 	}
 

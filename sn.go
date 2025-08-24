@@ -25,6 +25,8 @@ var CLI struct {
 		Username string `arg:"" required:"" help:"The user"`
 		Password string `arg:"" optional:"" help:"The password to set"`
 	} `cmd:"passwd" help:"Create or update a user password"`
+	RegenKeys struct {
+	} `cmd:"regen-keys" help:"Regenerate ActivityPub keys (removes existing encrypted keys)"`
 }
 
 func serve() {
@@ -118,6 +120,33 @@ func passwd(username string, passwords ...string) {
 	slog.Info(fmt.Sprintf("Password for user %s has been set successfully", username))
 }
 
+func regenKeys() {
+	_, err := sn.ConfigSetup()
+	if err != nil {
+		slog.Error(fmt.Sprintf("Error while setting up config: %v", err))
+		return
+	}
+
+	// Check if ActivityPub is enabled
+	if !sn.ActivityPubManager.IsEnabled() {
+		slog.Error("ActivityPub is not enabled - cannot regenerate keys")
+		return
+	}
+
+	slog.Info("Regenerating ActivityPub keys...")
+
+	// Delete existing keys
+	if sn.ActivityPubManager != nil {
+		err = sn.ActivityPubManager.Close()
+		if err != nil {
+			slog.Error(fmt.Sprintf("Error closing ActivityPub manager: %v", err))
+		}
+	}
+
+	slog.Info("ActivityPub keys regenerated successfully")
+	slog.Info("Note: Existing followers will need to re-follow your accounts")
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	err := godotenv.Load()
@@ -145,6 +174,9 @@ func main() {
 	case "sql <query>":
 		sqlQuery := CLI.Sql.Query
 		sql(sqlQuery)
+	case "regen-keys":
+		slog.Default().Info("regenerating ActivityPub keys")
+		regenKeys()
 	default:
 		fmt.Println(ctx.Command())
 	}

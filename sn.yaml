@@ -14,10 +14,17 @@ port: 8080
 path: welcome
 # ActivityPub configuration
 activitypub:
-  enabled: true
+  enabled: false
   primary_user: test
   branch: activitypub-data
   commit_interval_minutes: 10
+  # Optional overrides (if different from main config):
+  # title: "Different ActivityPub Name"
+  # rooturl: "https://public-domain.com/"
+  # domain: "public-domain.com"
+  # icon: "https://example.com/icon.png"
+  # banner: "https://example.com/banner.png"
+  # insecure: false
 # dbfile - The name of a database file or leave blank to use an in-memory database
 dbfile: "file:sn?mode=memory&cache=shared"
 # dbfile: 'asy.db'

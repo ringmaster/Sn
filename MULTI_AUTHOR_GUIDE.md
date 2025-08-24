@@ -1,13 +1,15 @@
 # Multi-Author ActivityPub Guide for Sn
 
-This guide explains how to set up and test multi-author blog posts with ActivityPub federation in Sn.
+This guide explains how multi-author blog posts work with ActivityPub federation in Sn.
 
 ## Quick Start
 
-### 1. Configuration Setup
+Enable ActivityPub with multiple users:
 
 ```yaml
-# sn.yaml
+title: "Multi-Author Blog"
+rooturl: "https://yourdomain.com/"
+
 activitypub:
   enabled: true
   primary_user: "admin"
@@ -15,15 +17,15 @@ activitypub:
 users:
   admin:
     displayName: "Site Admin"
-    passwordhash: "$2a$10$..." # Use: sn passwd admin
+    passwordhash: "$2a$10$..."
   alice:
     displayName: "Alice Johnson"
     bio: "Senior Developer"
-    passwordhash: "$2a$10$..." # Use: sn passwd alice
+    passwordhash: "$2a$10$..."
   bob:
     displayName: "Bob Wilson"
     bio: "UX Designer"
-    passwordhash: "$2a$10$..." # Use: sn passwd bob
+    passwordhash: "$2a$10$..."
 
 repos:
   posts:
@@ -32,27 +34,20 @@ repos:
     owner: "admin" # Fallback when post authors don't exist
 ```
 
-### 2. Create Multi-Author Post
+## Creating Multi-Author Posts
 
-#### Via Web Interface
-1. Login as `alice` at `/_/frontend`
-2. Create a new post - it automatically uses `alice` as the author
-3. The post will be federated from `@alice@yourdomain.com`
+### Via Web Interface
+- Login as any user at `/_/frontend`
+- Create a new post - automatically uses logged-in user as author
+- Post federates from that user's ActivityPub actor (`@username@yourdomain.com`)
 
-#### Via Markdown File
-Create `posts/collaboration.md`:
-
+### Via Markdown File
 ```yaml
 ---
 title: "Our Collaboration"
-slug: "collaboration"
-date: "2024-01-15 10:00:00"
 authors:
   - alice
   - bob
-tags:
-  - collaboration
-  - teamwork
 ---
 
 This post was written by both Alice and Bob working together.
@@ -200,151 +195,63 @@ curl -H "Accept: application/activity+json" \
 ```
 
 ### Storage Structure
+Each user maintains separate followers:
 ```
-.activitypub/
-├── users/
-│   ├── alice/
-│   │   ├── followers.json
-│   │   └── following.json
-│   ├── bob/
-│   │   ├── followers.json
-│   │   └── following.json
-│   └── admin/
-│       ├── followers.json
-│       └── following.json
-└── keys.json (shared)
+.activitypub/users/
+├── alice/followers.json
+├── bob/followers.json
+└── admin/followers.json
 ```
 
 ## Federation Testing
 
-### 1. Setup Test Environment
+### External Testing
+Use ngrok for public access:
 ```bash
-# Use ngrok for external access (required for federation)
 ngrok http 8080
-
-# Update config with public URL
-sed -i 's/localhost:8080/abc123.ngrok.io/' sn.yaml
+# Update rooturl in config to ngrok URL
 ```
 
-### 2. Test WebFinger Discovery
+### Test Endpoints
 ```bash
-# Test Alice's discoverability
-curl "https://abc123.ngrok.io/.well-known/webfinger?resource=acct:alice@abc123.ngrok.io"
+# WebFinger discovery
+curl "https://your-ngrok-url/.well-known/webfinger?resource=acct:alice@your-ngrok-url"
 
-# Test Bob's discoverability
-curl "https://abc123.ngrok.io/.well-known/webfinger?resource=acct:bob@abc123.ngrok.io"
+# Actor profiles
+curl -H "Accept: application/activity+json" https://your-ngrok-url/@alice
+curl -H "Accept: application/activity+json" https://your-ngrok-url/@bob
 ```
 
-### 3. Test Following from Mastodon
-1. In Mastodon, search for `@alice@abc123.ngrok.io`
-2. Click "Follow"
-3. Check Alice's followers:
-   ```bash
-   curl -H "Accept: application/activity+json" \
-     https://abc123.ngrok.io/@alice/followers
-   ```
-
-### 4. Test Multi-Author Post Federation
-1. Create a multi-author post as shown above
-2. Verify it appears in Mastodon timeline of Alice's followers
-3. Check that the post shows attribution to both authors
+### Test in Mastodon
+1. Search for `@alice@your-ngrok-url` and follow
+2. Create multi-author post and verify it appears in timeline
+3. Check attribution shows both authors
 
 ## Troubleshooting
 
 ### Common Issues
-
-#### "No valid authors found"
-**Problem**: Authors in frontmatter don't exist in `users` config
-**Solution**: Add all authors to the `users` section or they'll be ignored
-
-#### "Failed to publish to ActivityPub"
-**Problem**: Primary author doesn't have ActivityPub keys
-**Solution**: Restart Sn - keys are generated automatically
-
-#### Posts appear from wrong author
-**Problem**: Author resolution falling back unexpectedly
-**Solution**: Check logs for warnings about missing authors
+- **"No valid authors found"**: Add authors to `users` config section
+- **"Failed to publish to ActivityPub"**: Restart Sn to generate keys
+- **Posts from wrong author**: Check logs for fallback warnings
 
 ### Debug Commands
-
 ```bash
-# Check what authors are configured
+# Check configured users
 grep -A 10 "^users:" sn.yaml
 
 # Check post frontmatter
-head -20 posts/your-post.md
+head -10 posts/your-post.md
 
-# Check ActivityPub logs
-./sn serve 2>&1 | grep -i activitypub
-
-# Verify user exists for author
-curl -H "Accept: application/activity+json" \
-  http://localhost:8080/@author_name
+# Test actor endpoint
+curl -H "Accept: application/activity+json" http://localhost:8080/@username
 ```
 
-### Log Examples
+## Key Points
 
-**Successful Multi-Author:**
-```
-INFO ActivityPub services initialized successfully
-INFO Blog post published to ActivityPub title="Team Post" actor=https://domain.com/@alice author=alice
-```
+- **Primary Author**: First author in list becomes the ActivityPub actor
+- **Multi-Author Attribution**: All authors appear in `attributedTo` field
+- **Separate Followers**: Each user maintains their own follower list
+- **Fallback System**: Repo owner used when post authors don't exist
+- **Simple Config**: No duplication - reuses existing `title` and `rooturl`
 
-**Author Fallback:**
-```
-WARN Primary author not found, using alternate primary=guest_writer using=alice post="Guest Post"
-WARN Using repo owner as fallback author repo=posts owner=admin post="No Author Post"
-```
-
-## Best Practices
-
-### 1. User Management
-- Add all potential authors to `users` config before they write posts
-- Use consistent usernames between config and frontmatter
-- Set meaningful `displayName` for better federation experience
-
-### 2. Multi-Author Posts
-- List primary author first (they become the ActivityPub actor)
-- Only include authors who are configured users
-- Consider which author's followers should see the post
-
-### 3. Repository Organization
-```yaml
-repos:
-  alice_blog:
-    path: "alice-posts"
-    owner: "alice"     # Alice's personal posts
-  bob_blog:
-    path: "bob-posts"
-    owner: "bob"       # Bob's personal posts
-  team_blog:
-    path: "team-posts"
-    owner: "admin"     # Collaborative posts
-```
-
-### 4. Testing Workflow
-1. Test locally first with HTTP
-2. Use ngrok for federation testing
-3. Verify WebFinger works before testing follows
-4. Check logs for any warnings or errors
-5. Test both single and multi-author scenarios
-
-## Advanced Usage
-
-### Custom Author Attribution
-For complex attribution needs, you can manually edit the generated ActivityPub files in `.activitypub/` directory before they're committed.
-
-### Migration from Single-Author
-If migrating from a single-author setup:
-1. Add new users to config
-2. Update existing post frontmatter with authors
-3. Restart Sn to regenerate ActivityPub data
-4. Existing followers remain with original author
-
-### Performance Considerations
-- Multi-author posts use same resources as single-author
-- Each user maintains separate follower storage
-- Delivery happens once per post (from primary author)
-- Consider follower overlap when planning multi-author content
-
-This completes the multi-author ActivityPub setup for Sn. The system provides flexible author attribution while maintaining clean ActivityPub federation standards.
+For complete configuration details, see the main [ACTIVITYPUB.md](ACTIVITYPUB.md) documentation.

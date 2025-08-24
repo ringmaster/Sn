@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -251,15 +252,27 @@ func getPrimaryUser() string {
 }
 
 func getBaseURL() string {
-	// Try to get base URL from config
-	if baseURL := viper.GetString("site.base_url"); baseURL != "" {
-		return baseURL
+	// First try ActivityPub-specific override
+	if baseURL := viper.GetString("activitypub.rooturl"); baseURL != "" {
+		return strings.TrimSuffix(baseURL, "/")
 	}
 
-	// Try to get from domain config
-	if domain := viper.GetString("site.domain"); domain != "" {
+	// Then try existing rooturl config
+	if rootURL := viper.GetString("rooturl"); rootURL != "" {
+		// Remove trailing slash if present
+		return strings.TrimSuffix(rootURL, "/")
+	}
+
+	// Fall back to site.base_url if specified (legacy)
+	if baseURL := viper.GetString("site.base_url"); baseURL != "" {
+		return strings.TrimSuffix(baseURL, "/")
+	}
+
+	// Try to construct from domain
+	domain := getDomainFromConfig()
+	if domain != "localhost" {
 		scheme := "https"
-		if viper.GetBool("site.insecure") {
+		if viper.GetBool("activitypub.insecure") || viper.GetBool("site.insecure") {
 			scheme = "http"
 		}
 		return fmt.Sprintf("%s://%s", scheme, domain)
@@ -267,4 +280,59 @@ func getBaseURL() string {
 
 	// Default fallback
 	return "https://localhost"
+}
+
+// getDomainFromConfig extracts the domain from existing config
+func getDomainFromConfig() string {
+	// First try ActivityPub-specific domain override
+	if domain := viper.GetString("activitypub.domain"); domain != "" {
+		return domain
+	}
+
+	// Try to parse domain from ActivityPub rooturl override
+	if rootURL := viper.GetString("activitypub.rooturl"); rootURL != "" {
+		if u, err := url.Parse(rootURL); err == nil && u.Host != "" {
+			return u.Host
+		}
+	}
+
+	// Try to parse domain from main rooturl
+	if rootURL := viper.GetString("rooturl"); rootURL != "" {
+		if u, err := url.Parse(rootURL); err == nil && u.Host != "" {
+			return u.Host
+		}
+	}
+
+	// Legacy fallbacks
+	if domain := viper.GetString("site.domain"); domain != "" {
+		return domain
+	}
+
+	if baseURL := viper.GetString("site.base_url"); baseURL != "" {
+		if u, err := url.Parse(baseURL); err == nil && u.Host != "" {
+			return u.Host
+		}
+	}
+
+	return "localhost"
+}
+
+// getSiteNameFromConfig gets the site name from existing config
+func getSiteNameFromConfig() string {
+	// First try ActivityPub-specific title override
+	if title := viper.GetString("activitypub.title"); title != "" {
+		return title
+	}
+
+	// Then try existing title
+	if title := viper.GetString("title"); title != "" {
+		return title
+	}
+
+	// Legacy fallback to site.name
+	if siteName := viper.GetString("site.name"); siteName != "" {
+		return siteName
+	}
+
+	return "Sn Blog"
 }

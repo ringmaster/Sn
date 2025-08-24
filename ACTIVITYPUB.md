@@ -13,16 +13,31 @@ Sn now includes built-in ActivityPub support, allowing your blog to participate 
 
 ## Configuration
 
-### Basic Setup
+### Minimal Setup
 
-Add the following to your `sn.yaml` configuration file:
+The absolute minimum to enable ActivityPub:
 
 ```yaml
-# Site configuration (required for ActivityPub)
-site:
-  name: "My Awesome Blog"
-  domain: "myblog.example.com"
-  base_url: "https://myblog.example.com"
+title: "My Blog"
+rooturl: "https://myblog.com/"
+
+activitypub:
+  enabled: true
+  primary_user: "admin"
+
+users:
+  admin:
+    displayName: "Blog Author"
+    passwordhash: "$2a$10$..." # Use `sn passwd admin` to generate
+```
+
+That's it! Everything else is derived automatically from your existing config.
+
+### Full Configuration Example
+
+```yaml
+title: "My Awesome Blog"
+rooturl: "https://myblog.example.com/"
 
 # ActivityPub configuration
 activitypub:
@@ -30,43 +45,111 @@ activitypub:
   primary_user: "admin"
   branch: "activitypub-data"
   commit_interval_minutes: 10
+  # Optional overrides (only specify if different from main config):
+  # title: "Different ActivityPub Name"      # Override title for ActivityPub
+  # rooturl: "https://public-domain.com/"    # Override rooturl for ActivityPub
+  # domain: "public-domain.com"              # Override domain for ActivityPub
+  icon: "https://myblog.example.com/icon.png"       # Optional profile icon
+  banner: "https://myblog.example.com/banner.png"   # Optional profile banner
+  # insecure: false                          # Allow HTTP (for development)
 
 # Users (at least one required)
 users:
   admin:
     displayName: "John Doe"
     bio: "Tech blogger and open source enthusiast"
-    passwordhash: "$2a$10$..." # Use `sn passwd admin` to generate
+    passwordhash: "$2a$10$..."
+  alice:
+    displayName: "Alice Johnson"
+    bio: "Senior Developer"
+    passwordhash: "$2a$10$..."
 
 # Repository configuration
 repos:
   blog:
     path: "posts"
     activitypub: true    # Enable ActivityPub for this repo
-    owner: "admin"       # Primary user for this repo
+    owner: "admin"       # Fallback user for this repo
   drafts:
     path: "drafts"
     activitypub: false   # Disable ActivityPub for drafts
 ```
 
+### Configuration Rules
+
+#### No Duplication Required
+ActivityPub automatically reuses your existing config:
+- **Site Name**: Uses `title` (override with `activitypub.title` if needed)
+- **Domain**: Extracted from `rooturl` host (override with `activitypub.domain` if needed)
+- **Base URL**: Uses `rooturl` (override with `activitypub.rooturl` if needed)
+
+#### Override Names Match What They Override
+- `activitypub.title` overrides `title`
+- `activitypub.rooturl` overrides `rooturl`
+- `activitypub.domain` overrides domain (parsed from `rooturl`)
+
+#### Everything ActivityPub Goes in `activitypub` Section
+No separate `site` section needed - all ActivityPub settings live together.
+
 ### Configuration Options
 
-#### `activitypub` section:
-- `enabled`: Enable/disable ActivityPub functionality (default: false)
-- `primary_user`: Which user should be the main ActivityPub actor
-- `branch`: Git branch name for storing ActivityPub data (default: "activitypub-data")
-- `commit_interval_minutes`: How often to commit ActivityPub changes (default: 10)
+#### Core Settings (Required)
+- `activitypub.enabled`: Enable/disable ActivityPub functionality (default: false)
+- `activitypub.primary_user`: Which user should be the main ActivityPub actor
 
-#### `site` section (required when ActivityPub is enabled):
-- `name`: Your site/blog name
-- `domain`: The domain your blog runs on
-- `base_url`: Full base URL of your site
-- `icon`: (optional) URL to your site's icon/avatar
-- `banner`: (optional) URL to your site's banner image
+#### ActivityPub Settings (Optional)
+- `activitypub.branch`: Git branch name for storing ActivityPub data (default: "activitypub-data")
+- `activitypub.commit_interval_minutes`: How often to commit ActivityPub changes (default: 10)
 
-#### Per-repo ActivityPub settings:
+#### ActivityPub Overrides (Optional)
+- `activitypub.title`: Override site name for ActivityPub (different from `title`)
+- `activitypub.rooturl`: Override base URL for ActivityPub (different from `rooturl`)
+- `activitypub.domain`: Override domain for ActivityPub (different from `rooturl` host)
+- `activitypub.icon`: URL to your ActivityPub profile icon/avatar
+- `activitypub.banner`: URL to your ActivityPub profile banner image
+- `activitypub.insecure`: Allow HTTP for development (default: false)
+
+#### Per-Repo Settings
 - `activitypub`: Whether posts from this repo should be federated (default: true if global ActivityPub is enabled)
 - `owner`: Fallback user when posts don't specify valid authors (used mainly for deletions)
+
+### Example Scenarios
+
+#### Development Setup
+```yaml
+title: "Dev Blog"
+rooturl: "http://localhost:8080/"
+
+activitypub:
+  enabled: true
+  primary_user: "dev"
+  insecure: true  # Allow HTTP for local testing
+
+users:
+  dev:
+    displayName: "Developer"
+    passwordhash: "$2a$10$..."
+```
+
+#### Production with Different Public Domain
+```yaml
+title: "Company Internal Blog"
+rooturl: "https://internal.company.com/"
+
+activitypub:
+  enabled: true
+  primary_user: "editor"
+  # Public federation uses different domain:
+  title: "ACME Corp Tech Blog"
+  rooturl: "https://blog.company.com/"
+  icon: "https://blog.company.com/logo.png"
+  banner: "https://blog.company.com/banner.jpg"
+
+users:
+  editor:
+    displayName: "Chief Editor"
+    passwordhash: "$2a$10$..."
+```
 
 ## Storage Architecture
 
@@ -285,6 +368,28 @@ SN_GIT_PASSWORD=your-token-or-password
 ### Optional Configuration
 ```bash
 SN_CONFIG=/path/to/sn.yaml
+```
+
+### Configuration Migration
+
+If you have old configuration with duplicate values, clean it up:
+
+```yaml
+# OLD - Remove these duplicates:
+title: "My Blog"
+rooturl: "https://myblog.com/"
+site:
+  name: "My Blog"                    # ❌ Remove (duplicate of title)
+  domain: "myblog.com"               # ❌ Remove (from rooturl)
+  base_url: "https://myblog.com/"    # ❌ Remove (duplicate of rooturl)
+  icon: "/icon.png"                  # ❌ Move to activitypub section
+
+# NEW - Clean structure:
+title: "My Blog"
+rooturl: "https://myblog.com/"
+activitypub:
+  enabled: true
+  icon: "/icon.png"     # ✅ Moved here (ActivityPub-specific)
 ```
 
 ## Troubleshooting

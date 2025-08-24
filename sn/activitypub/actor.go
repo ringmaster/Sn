@@ -57,8 +57,9 @@ func (as *ActorService) HandleWebfinger(w http.ResponseWriter, r *http.Request) 
 	username := accountName[:atIndex]
 	domain := accountName[atIndex+1:]
 
-	// Validate domain matches request host
-	if domain != r.Host {
+	// Validate domain matches request host or configured domain
+	expectedDomain := getDomainFromConfig()
+	if domain != r.Host && domain != expectedDomain {
 		http.Error(w, "Invalid domain", http.StatusBadRequest)
 		return
 	}
@@ -168,12 +169,6 @@ func (as *ActorService) HandleActor(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get site information
-	siteName := viper.GetString("site.name")
-	if siteName == "" {
-		siteName = "Sn Blog"
-	}
-
 	// Create actor object
 	actor := &Actor{
 		Context:                   ActivityPubContext,
@@ -201,7 +196,7 @@ func (as *ActorService) HandleActor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add icon if configured
-	if iconURL := viper.GetString("site.icon"); iconURL != "" {
+	if iconURL := viper.GetString("activitypub.icon"); iconURL != "" {
 		actor.Icon = &Image{
 			Type: "Image",
 			URL:  iconURL,
@@ -209,7 +204,7 @@ func (as *ActorService) HandleActor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add banner if configured
-	if bannerURL := viper.GetString("site.banner"); bannerURL != "" {
+	if bannerURL := viper.GetString("activitypub.banner"); bannerURL != "" {
 		actor.Image = &Image{
 			Type: "Image",
 			URL:  bannerURL,

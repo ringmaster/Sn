@@ -38,6 +38,7 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
+	"github.com/ringmaster/Sn/sn/activitypub"
 	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/acme/autocert"
@@ -508,7 +509,7 @@ func templateHandler(w http.ResponseWriter, r *http.Request, routeName string) {
 		statusCode = 200
 		slog.Default().Warn("Unexpected http_status type", "type", fmt.Sprintf("%T", v), "value", v)
 	}
-	
+
 	w.WriteHeader(statusCode)
 
 	w.Write([]byte(rendered))
@@ -706,6 +707,12 @@ func repoRestPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse the date for ActivityPub
+	publishedTime, err := time.Parse("2006-01-02 15:04:05", payload.Date)
+	if err != nil {
+		publishedTime = time.Now()
+	}
+
 	if snGitRepo := os.Getenv("SN_GIT_REPO"); snGitRepo != "" {
 		// Retrieve username and password from environment variables
 		gitusername := os.Getenv("SN_GIT_USERNAME")
@@ -757,10 +764,86 @@ func repoRestPostHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Publish to ActivityPub after successful git operations
+		if ActivityPubManager != nil && ActivityPubManager.IsEnabled() {
+			// Build post URL
+			scheme := "https"
+			if r.TLS == nil {
+				scheme = "http"
+			}
+			postURL := fmt.Sprintf("%s://%s/%s/%s", scheme, r.Host, payload.Repo, payload.Slug)
+
+			// Parse tags
+			var tags []string
+			if payload.Tags != "" {
+				tagList := strings.Split(payload.Tags, ",")
+				for _, tag := range tagList {
+					tags = append(tags, strings.TrimSpace(tag))
+				}
+			}
+
+			// Create ActivityPub blog post
+			blogPost := &activitypub.BlogPost{
+				Title:           payload.Title,
+				URL:             postURL,
+				HTMLContent:     payload.Content, // TODO: Convert markdown to HTML
+				MarkdownContent: payload.Content,
+				Summary:         "", // TODO: Extract summary if needed
+				PublishedAt:     publishedTime,
+				Tags:            tags,
+				Repo:            payload.Repo,
+				Slug:            payload.Slug,
+			}
+
+			err = ActivityPubManager.PublishPost(blogPost)
+			if err != nil {
+				slog.Error("Failed to publish to ActivityPub", "error", err, "title", payload.Title)
+				// Don't fail the entire operation, just log the error
+			}
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte(`{"message": "Markdown file created and pushed to remote repository successfully"}`))
 	} else {
+		// Publish to ActivityPub in local mode too
+		if ActivityPubManager != nil && ActivityPubManager.IsEnabled() {
+			// Build post URL
+			scheme := "https"
+			if r.TLS == nil {
+				scheme = "http"
+			}
+			postURL := fmt.Sprintf("%s://%s/%s/%s", scheme, r.Host, payload.Repo, payload.Slug)
+
+			// Parse tags
+			var tags []string
+			if payload.Tags != "" {
+				tagList := strings.Split(payload.Tags, ",")
+				for _, tag := range tagList {
+					tags = append(tags, strings.TrimSpace(tag))
+				}
+			}
+
+			// Create ActivityPub blog post
+			blogPost := &activitypub.BlogPost{
+				Title:           payload.Title,
+				URL:             postURL,
+				HTMLContent:     payload.Content, // TODO: Convert markdown to HTML
+				MarkdownContent: payload.Content,
+				Summary:         "", // TODO: Extract summary if needed
+				PublishedAt:     publishedTime,
+				Tags:            tags,
+				Repo:            payload.Repo,
+				Slug:            payload.Slug,
+			}
+
+			err = ActivityPubManager.PublishPost(blogPost)
+			if err != nil {
+				slog.Error("Failed to publish to ActivityPub", "error", err, "title", payload.Title)
+				// Don't fail the entire operation, just log the error
+			}
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte(`{"message": "Markdown file created successfully"}`))
@@ -954,7 +1037,10 @@ func setRootUrl(r *http.Request) {
 }
 
 func setupRoutes(router *mux.Router) {
-	router.HandleFunc("/.well-known/webfinger", fingerHandler).Name("well-known-webfinger")
+	// Register ActivityPub routes
+	if ActivityPubManager != nil && ActivityPubManager.IsEnabled() {
+		ActivityPubManager.RegisterRoutes(router)
+	}
 
 	routelist := make([]string, 0, len(viper.GetStringMap("routes")))
 	for key := range viper.GetStringMap("routes") {
@@ -1013,6 +1099,11 @@ func setupRoutes(router *mux.Router) {
 		default:
 			router.HandleFunc(routePath, catchallHandler).Name(routeName)
 		}
+	}
+
+	// Legacy webfinger handler fallback (if ActivityPub is disabled)
+	if ActivityPubManager == nil || !ActivityPubManager.IsEnabled() {
+		router.HandleFunc("/.well-known/webfinger", fingerHandler).Name("well-known-webfinger")
 	}
 }
 

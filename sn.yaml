@@ -7,11 +7,17 @@ title: Sn
 # subtitle - The subtitle of the site, usable in templates for output as {subtitle}
 subtitle: Sn is Tin
 # rooturl - The root url of the site, usable in templates for output as {rooturl}
-rooturl: "http://localhost/"
+rooturl: "http://localhost:8080/"
 # port - The port on which the server runs
 port: 8080
 # path - The "root path" for all referenced files here, relative to this file
 path: welcome
+# ActivityPub configuration
+activitypub:
+  enabled: true
+  primary_user: test
+  branch: activitypub-data
+  commit_interval_minutes: 10
 # dbfile - The name of a database file or leave blank to use an in-memory database
 dbfile: "file:sn?mode=memory&cache=shared"
 # dbfile: 'asy.db'
@@ -24,8 +30,11 @@ repos:
   posts:
     # path - The directory inside of the root path that will be scanned for files for this repo
     path: posts
+    # activitypub - Whether to publish posts from this repo to ActivityPub (defaults to true if ActivityPub is enabled)
+    activitypub: true
   pages:
     path: pages
+    activitypub: false
 # users - A list of users for authentication
 users:
   test:

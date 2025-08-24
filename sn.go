@@ -36,6 +36,16 @@ func serve() {
 
 		sn.DBConnect()
 		defer sn.DBClose()
+
+		// Set up ActivityPub cleanup
+		defer func() {
+			if sn.ActivityPubManager != nil {
+				if err := sn.ActivityPubManager.Close(); err != nil {
+					slog.Error(fmt.Sprintf("Error cleaning up ActivityPub: %v", err))
+				}
+			}
+		}()
+
 		sn.DBLoadRepos()
 
 		sn.WebserverStart()

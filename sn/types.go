@@ -1,6 +1,10 @@
 package sn
 
-import "time"
+import (
+	"time"
+
+	"github.com/ringmaster/Sn/sn/activitypub"
+)
 
 // Item is...
 type Item struct {
@@ -35,3 +39,6 @@ type Author struct {
 	Name  string
 	Count int
 }
+
+// ActivityPubManager holds the global ActivityPub manager instance
+var ActivityPubManager *activitypub.Manager

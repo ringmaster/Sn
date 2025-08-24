@@ -15,6 +15,7 @@ import (
 	"github.com/c4milo/afero2billy"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/storage/memory"
+	"github.com/ringmaster/Sn/sn/activitypub"
 	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 )
@@ -34,6 +35,9 @@ func ConfigSetup() (afero.Fs, error) {
 	viper.AutomaticEnv()
 
 	viper.SetDefault("use_ssl", true)
+	viper.SetDefault("activitypub.enabled", false)
+	viper.SetDefault("activitypub.branch", "activitypub-data")
+	viper.SetDefault("activitypub.commit_interval_minutes", 10)
 	viper.AddConfigPath("/")
 	viper.AddConfigPath("")
 
@@ -96,6 +100,13 @@ func ConfigSetup() (afero.Fs, error) {
 	viper.SetDefault("path", filepath.Dir(viper.ConfigFileUsed()))
 
 	fmt.Printf("The passwordhash for the user test from the config is: %#q\n", viper.GetString("users.test.passwordhash"))
+
+	// Initialize ActivityPub manager
+	ActivityPubManager, err = activitypub.NewManager(Vfs)
+	if err != nil {
+		slog.Error(fmt.Sprintf("Failed to initialize ActivityPub: %v", err))
+		return nil, err
+	}
 
 	return Vfs, nil
 }

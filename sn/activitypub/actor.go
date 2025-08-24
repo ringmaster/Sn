@@ -353,11 +353,14 @@ func extractUsernameFromPath(path, suffix string) string {
 func userExists(username string) bool {
 	users := viper.GetStringMap("users")
 	_, exists := users[username]
+	slog.Info("Checking if user exists", "username", username, "exists", exists, "total_users", len(users))
 	return exists
 }
 
 func isActivityPubEnabled() bool {
-	return viper.GetBool("activitypub.enabled")
+	enabled := viper.GetBool("activitypub.enabled")
+	slog.Info("ActivityPub enabled check", "enabled", enabled)
+	return enabled
 }
 
 func getScheme(r *http.Request) string {

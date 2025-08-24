@@ -29,3 +29,5 @@ test/schema.sql
 sn/Sn
 .env
 *.DS_Store
+*.log
+.activitypub

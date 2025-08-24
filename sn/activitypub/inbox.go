@@ -29,17 +29,23 @@ func NewInboxService(storage *Storage, keyManager *KeyManager, actorService *Act
 
 // HandleInbox handles incoming ActivityPub activities
 func (is *InboxService) HandleInbox(w http.ResponseWriter, r *http.Request) {
+	slog.Info("ActivityPub inbox request received", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr, "user_agent", r.Header.Get("User-Agent"))
+
 	// Only accept POST requests
 	if r.Method != http.MethodPost {
+		slog.Warn("Invalid method for ActivityPub inbox", "method", r.Method, "path", r.URL.Path)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	// Check if ActivityPub is enabled
 	if !isActivityPubEnabled() {
+		slog.Error("ActivityPub inbox request received but ActivityPub is not enabled", "path", r.URL.Path, "remote_addr", r.RemoteAddr)
 		http.Error(w, "ActivityPub not enabled", http.StatusNotFound)
 		return
 	}
+
+	slog.Info("ActivityPub is enabled, processing inbox request", "path", r.URL.Path)
 
 	// Read request body
 	body, err := io.ReadAll(r.Body)
@@ -77,15 +83,19 @@ func (is *InboxService) HandleInbox(w http.ResponseWriter, r *http.Request) {
 	// Extract username from URL path
 	username := extractUsernameFromInboxPath(r.URL.Path)
 	if username == "" {
+		slog.Error("Could not extract username from inbox path", "path", r.URL.Path)
 		http.Error(w, "Invalid inbox path", http.StatusBadRequest)
 		return
 	}
+	slog.Info("Extracted username from inbox path", "username", username, "path", r.URL.Path)
 
 	// Validate user exists
 	if !userExists(username) {
+		slog.Error("User does not exist for ActivityPub inbox", "username", username, "path", r.URL.Path)
 		http.Error(w, "Actor not found", http.StatusNotFound)
 		return
 	}
+	slog.Info("Validated user exists", "username", username)
 
 	// Process the activity
 	err = is.processActivity(&activity, username, r)
@@ -130,26 +140,36 @@ func (is *InboxService) processActivity(activity *Activity, username string, r *
 // handleFollow processes Follow activities
 func (is *InboxService) handleFollow(activity *Activity, username string, r *http.Request) error {
 	actorID := activity.Actor
+	slog.Info("Processing Follow activity", "actor", actorID, "username", username)
+
 	if actorID == "" {
+		slog.Error("Missing actor in Follow activity", "username", username)
 		return fmt.Errorf("missing actor in Follow activity")
 	}
 
 	// Parse object - should be our actor URL
 	objectStr, ok := activity.Object.(string)
 	if !ok {
+		slog.Error("Invalid object in Follow activity", "actor", actorID, "username", username)
 		return fmt.Errorf("invalid object in Follow activity")
 	}
 
 	expectedActorURL := GetActorURL(r, username)
 	if objectStr != expectedActorURL {
+		slog.Error("Follow object mismatch", "actor", actorID, "username", username, "got", objectStr, "expected", expectedActorURL)
 		return fmt.Errorf("Follow object doesn't match our actor URL: got %s, expected %s", objectStr, expectedActorURL)
 	}
 
+	slog.Info("Follow activity validated", "actor", actorID, "username", username, "object", objectStr)
+
 	// Fetch the follower's actor info
+	slog.Info("Fetching follower actor info", "actor", actorID)
 	followerActor, err := is.fetchActor(actorID)
 	if err != nil {
+		slog.Error("Failed to fetch follower actor", "actor", actorID, "error", err)
 		return fmt.Errorf("failed to fetch follower actor: %w", err)
 	}
+	slog.Info("Successfully fetched follower actor", "actor", actorID, "username", followerActor.PreferredUsername)
 
 	// Create follower record
 	follower := &Follower{
@@ -165,61 +185,84 @@ func (is *InboxService) handleFollow(activity *Activity, username string, r *htt
 	}
 
 	// Load current followers for this user
+	slog.Info("Loading current followers", "username", username)
 	followers, err := is.storage.LoadFollowers(username)
 	if err != nil {
+		slog.Error("Failed to load followers", "username", username, "error", err)
 		return fmt.Errorf("failed to load followers: %w", err)
 	}
+	slog.Info("Loaded followers", "username", username, "count", len(followers))
 
 	// Add to followers map
 	followers[actorID] = follower
+	slog.Info("Added follower to map", "actor", actorID, "username", username, "follower_username", follower.Username, "domain", follower.Domain)
 
 	// Save followers to storage
 	err = is.storage.SaveFollowers(username, followers)
 	if err != nil {
+		slog.Error("Failed to save followers", "username", username, "error", err)
 		return fmt.Errorf("failed to save followers: %w", err)
 	}
+	slog.Info("Successfully saved followers to storage", "username", username, "total_followers", len(followers))
 
 	// Send Accept activity back to the follower
+	slog.Info("Sending Accept activity to follower", "actor", actorID, "inbox", follower.InboxURL)
 	err = is.sendAcceptActivity(activity, follower, username, r)
 	if err != nil {
-		slog.Error("Failed to send Accept activity", "error", err, "follower", actorID)
+		slog.Error("Failed to send Accept activity", "error", err, "follower", actorID, "inbox", follower.InboxURL)
 		// Don't return error here, the follow was still processed successfully
+	} else {
+		slog.Info("Successfully sent Accept activity", "actor", actorID, "inbox", follower.InboxURL)
 	}
 
-	slog.Info("Follow request processed", "follower", actorID, "username", username)
+	slog.Info("Follow request processed successfully", "follower", actorID, "username", username, "follower_username", follower.Username, "domain", follower.Domain, "total_followers", len(followers))
 	return nil
 }
 
 // handleUndo processes Undo activities
 func (is *InboxService) handleUndo(activity *Activity, username string, r *http.Request) error {
 	actorID := activity.Actor
+	slog.Info("Processing Undo activity", "actor", actorID, "username", username)
+
+	if actorID == "" {
+		slog.Error("Missing actor in Undo activity", "username", username)
+		return fmt.Errorf("missing actor in Undo activity")
+	}
 
 	// Parse the undone object
 	objectMap, ok := activity.Object.(map[string]interface{})
 	if !ok {
+		slog.Error("Invalid object in Undo activity", "actor", actorID, "username", username)
 		return fmt.Errorf("invalid object in Undo activity")
 	}
 
 	objectType, ok := objectMap["type"].(string)
 	if !ok {
+		slog.Error("Missing type in undone object", "actor", actorID, "username", username)
 		return fmt.Errorf("missing type in undone object")
 	}
+	slog.Info("Undo activity type", "actor", actorID, "username", username, "object_type", objectType)
 
 	switch objectType {
 	case TypeFollow:
 		// Handle unfollow
+		slog.Info("Processing unfollow", "actor", actorID, "username", username)
 		followers, err := is.storage.LoadFollowers(username)
 		if err != nil {
+			slog.Error("Failed to load followers for unfollow", "username", username, "error", err)
 			return fmt.Errorf("failed to load followers: %w", err)
 		}
+		slog.Info("Loaded followers for unfollow", "username", username, "count", len(followers))
 
-		if _, exists := followers[actorID]; exists {
+		if followerInfo, exists := followers[actorID]; exists {
+			slog.Info("Removing follower", "actor", actorID, "username", username, "follower_username", followerInfo.Username, "domain", followerInfo.Domain)
 			delete(followers, actorID)
 			err := is.storage.SaveFollowers(username, followers)
 			if err != nil {
+				slog.Error("Failed to save followers after unfollow", "username", username, "error", err)
 				return fmt.Errorf("failed to save followers after unfollow: %w", err)
 			}
-			slog.Info("Unfollowed", "actor", actorID, "username", username)
+			slog.Info("Unfollow processed successfully", "actor", actorID, "username", username, "follower_username", followerInfo.Username, "remaining_followers", len(followers))
 		} else {
 			slog.Warn("Attempted to unfollow non-existent follower", "actor", actorID, "username", username)
 		}

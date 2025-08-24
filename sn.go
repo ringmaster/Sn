@@ -121,6 +121,9 @@ func passwd(username string, passwords ...string) {
 }
 
 func regenKeys() {
+	slog.Info("Regenerating ActivityPub keys...")
+
+	// Set up config and initialize ActivityPub to access the git repository
 	_, err := sn.ConfigSetup()
 	if err != nil {
 		slog.Error(fmt.Sprintf("Error while setting up config: %v", err))
@@ -128,19 +131,19 @@ func regenKeys() {
 	}
 
 	// Check if ActivityPub is enabled
-	if !sn.ActivityPubManager.IsEnabled() {
+	if sn.ActivityPubManager == nil || !sn.ActivityPubManager.IsEnabled() {
 		slog.Error("ActivityPub is not enabled - cannot regenerate keys")
 		return
 	}
 
-	slog.Info("Regenerating ActivityPub keys...")
+	// In git mode, we need to force deletion and regeneration through the storage layer
+	slog.Info("Removing corrupted ActivityPub keys...")
 
-	// Delete existing keys
-	if sn.ActivityPubManager != nil {
-		err = sn.ActivityPubManager.Close()
-		if err != nil {
-			slog.Error(fmt.Sprintf("Error closing ActivityPub manager: %v", err))
-		}
+	// Force regeneration by calling the internal method
+	err = sn.ForceRegenerateActivityPubKeys()
+	if err != nil {
+		slog.Error(fmt.Sprintf("Error regenerating ActivityPub keys: %v", err))
+		return
 	}
 
 	slog.Info("ActivityPub keys regenerated successfully")

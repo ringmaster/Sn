@@ -444,6 +444,17 @@ func (s *Storage) DeleteKeys() error {
 		return fmt.Errorf("failed to delete keys file: %w", err)
 	}
 	slog.Info("Deleted ActivityPub keys file - new keys will be generated on next use")
+
+	// In git mode, commit the deletion immediately
+	if s.activityPubRepo != nil {
+		s.markPendingChanges()
+		// Force immediate commit for key regeneration
+		err = s.commitChanges()
+		if err != nil {
+			slog.Warn("Failed to commit key deletion", "error", err)
+		}
+	}
+
 	return nil
 }
 

@@ -229,6 +229,42 @@ func (m *Manager) GetComments(repo, slug string) ([]*Comment, error) {
 	return m.storage.LoadComments(repo, slug)
 }
 
+// ForceRegenerateKeys forces regeneration of ActivityPub keys (recovery from corruption)
+func (m *Manager) ForceRegenerateKeys() error {
+	if !m.enabled {
+		return fmt.Errorf("ActivityPub is not enabled")
+	}
+
+	slog.Info("Force regenerating ActivityPub keys for recovery")
+
+	// Delete existing keys through storage layer
+	err := m.storage.DeleteKeys()
+	if err != nil {
+		slog.Warn("Failed to delete existing keys", "error", err)
+		// Continue anyway - might not exist
+	}
+
+	// Get the primary user for key regeneration
+	primaryUser := getPrimaryUser()
+	if primaryUser == "" {
+		return fmt.Errorf("no primary user configured for ActivityPub")
+	}
+
+	// Build actor URL for key initialization
+	baseURL := getBaseURL()
+	actorURL := fmt.Sprintf("%s/@%s", baseURL, primaryUser)
+
+	// Force regeneration of keys
+	err = m.keyManager.InitializeKeys(actorURL)
+	if err != nil {
+		return fmt.Errorf("failed to regenerate ActivityPub keys: %w", err)
+	}
+
+	slog.Info("ActivityPub keys regenerated successfully")
+	slog.Warn("Note: Existing followers will need to re-follow your accounts")
+	return nil
+}
+
 // Close cleans up resources
 func (m *Manager) Close() error {
 	if !m.enabled {

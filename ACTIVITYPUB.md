@@ -30,6 +30,8 @@ Sn now includes built-in ActivityPub support, allowing your blog to participate 
 - [Contributing](#contributing)
 - [Resources](#resources)
 
+**Note for Contributors**: This application is designed to be completely self-contained and must work with both local files and virtual filesystem (git mode). Do not create external scripts or utilities that require direct filesystem access, as they will not work in git mode where files are stored in a virtual filesystem only accessible to the running application. All recovery and maintenance operations should be implemented as built-in commands accessible via the main `sn` binary.
+
 ## Features
 
 - **Actor Profile**: Each user becomes an ActivityPub actor that can be discovered and followed
@@ -626,7 +628,8 @@ activitypub:
 2. **Master Key Missing**: Ensure `activitypub.master_key` is set (required)
 3. **Verify Users**: At least one user must be configured
 4. **Check Logs**: Look for ActivityPub initialization messages
-5. **Test WebFinger**: Try accessing `/.well-known/webfinger?resource=acct:user@yourdomain.com`
+5. **Git Mode Key Issues**: If using `SN_GIT_REPO`, use `./sn regen-keys` for key problems
+6. **Test WebFinger**: Try accessing `/.well-known/webfinger?resource=acct:user@yourdomain.com`
 
 ### Git Branch Issues
 
@@ -642,8 +645,8 @@ activitypub:
 
 2. **Base64 Decoding Error**: `failed to decode base64: illegal base64 data` error
    - Corrupted or incompatible keys.json file from previous version
-   - **Quick Fix**: Delete corrupted keys file: `rm .activitypub/keys.json`
-   - **Alternative**: Use command: `./sn regen-keys`
+   - **Git Mode (SN_GIT_REPO set)**: Use command: `./sn regen-keys` (ONLY option for git mode)
+   - **Local Mode**: Delete corrupted keys file: `rm .activitypub/keys.json` OR use `./sn regen-keys`
    - Restart Sn to generate new encrypted keys
    - **Note**: Existing followers will need to re-follow your accounts
 
@@ -655,22 +658,20 @@ activitypub:
 
 4. **Keys File Corrupted**: `keys file corrupted` error
    - File became corrupted or partially written
-   - **Quick Recovery**: Use the provided recovery script:
+   - **Git Mode Recovery** (when using SN_GIT_REPO):
      ```bash
-     ./scripts/recover-activitypub-keys.sh
+     # ONLY option for git mode - files are in virtual filesystem
+     ./sn regen-keys
+     ./sn serve
      ```
-   - **Manual Recovery Steps**:
+   - **Local Mode Recovery**:
      ```bash
-     # Backup existing data
-     cp -r .activitypub activitypub-backup-$(date +%Y%m%d)
-
-     # Remove corrupted file
-     rm .activitypub/keys.json
-
-     # Or use built-in command
+     # Use built-in command (recommended)
      ./sn regen-keys
 
-     # Then restart
+     # OR manual steps (LOCAL MODE ONLY - requires direct filesystem access)
+     cp -r .activitypub activitypub-backup-$(date +%Y%m%d)
+     rm .activitypub/keys.json
      ./sn serve
      ```
 

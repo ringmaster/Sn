@@ -111,6 +111,16 @@ func ConfigSetup() (afero.Fs, error) {
 	return Vfs, nil
 }
 
+// ForceRegenerateActivityPubKeys forces regeneration of ActivityPub keys
+// This is used by the regen-keys command to recover from corrupted keys
+func ForceRegenerateActivityPubKeys() error {
+	if ActivityPubManager == nil || !ActivityPubManager.IsEnabled() {
+		return fmt.Errorf("ActivityPub is not enabled")
+	}
+
+	return ActivityPubManager.ForceRegenerateKeys()
+}
+
 func CloneRepoToVFS(snGitRepo string) (afero.Fs, error) {
 	slog.Info("Cloning repository to virtual filesystem")
 

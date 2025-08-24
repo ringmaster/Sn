@@ -22,6 +22,7 @@ import (
 	"github.com/araddon/dateparse"
 	"github.com/arpitgogia/rake"
 	attributes "github.com/mdigger/goldmark-attributes"
+	"github.com/ringmaster/Sn/sn/activitypub"
 	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 	"github.com/yuin/goldmark"
@@ -52,27 +53,27 @@ func schema() string {
 		"title" varchar(255) NOT NULL,
 		"frontmatter" text(128)
 	  );
-	  
+
 	  CREATE INDEX IF NOT EXISTS items_repo ON "items" ("repo" ASC);
-	  
+
 	  CREATE UNIQUE INDEX IF NOT EXISTS items_repo_slug ON "items" ("slug" ASC, "repo" ASC);
-	  
+
 	  CREATE INDEX IF NOT EXISTS items_published_on ON "items" ("publishedon" ASC);
-	  
+
 	  CREATE TABLE IF NOT EXISTS "authors" (
 		"id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 		"author" varchar(128)
 	  );
-	  
+
 	  CREATE UNIQUE INDEX IF NOT EXISTS authors_author ON "authors" ("author" ASC);
-	  
+
 	  CREATE TABLE IF NOT EXISTS "categories" (
 		"id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 		"category" varchar(128) NOT NULL
 	  );
-	  
+
 	  CREATE UNIQUE INDEX IF NOT EXISTS categories_category ON "categories" ("category" ASC);
-	  
+
 	  CREATE TABLE IF NOT EXISTS "frontmatter" (
 		"id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 		"item_id" integer(128) NOT NULL,
@@ -80,13 +81,13 @@ func schema() string {
 		"value" text(128),
 		FOREIGN KEY (item_id) REFERENCES "items" (id)
 	  );
-	  
+
 	  CREATE INDEX IF NOT EXISTS frontmatter_fieldname ON "frontmatter" ("fieldname" ASC);
-	  
+
 	  CREATE INDEX IF NOT EXISTS frontmatter_item_id ON "frontmatter" ("item_id" ASC);
-	  
+
 	  CREATE INDEX IF NOT EXISTS frontmatter_fieldname_value ON "frontmatter" ("fieldname" ASC, "value" ASC);
-	  
+
 	  CREATE TABLE IF NOT EXISTS "items_authors" (
 		"id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 		"item_id" integer(128) NOT NULL,
@@ -94,13 +95,13 @@ func schema() string {
 		FOREIGN KEY (item_id) REFERENCES "items" (id),
 		FOREIGN KEY (author_id) REFERENCES "authors" (id)
 	  );
-	  
+
 	  CREATE INDEX IF NOT EXISTS items_authors_author_id ON "items_authors" ("author_id" ASC);
-	  
+
 	  CREATE UNIQUE INDEX IF NOT EXISTS items_authors_item_id_author_id ON "items_authors" ("item_id" ASC, "author_id" ASC);
-	  
+
 	  CREATE INDEX IF NOT EXISTS iterms_authors_item_id ON "items_authors" ("item_id" ASC);
-	  
+
 	  CREATE TABLE IF NOT EXISTS "items_categories" (
 		"id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 		"item_id" integer(128),
@@ -108,10 +109,10 @@ func schema() string {
 		FOREIGN KEY (item_id) REFERENCES "items" (id),
 		FOREIGN KEY (category_id) REFERENCES "categories" (id)
 	  );
-	  
+
 	  CREATE INDEX IF NOT EXISTS items_categories_item_id ON "items_categories" ("item_id" ASC);
-	  
-	  CREATE INDEX IF NOT EXISTS items_categories_category_id ON "items_categories" ("category_id" ASC);	  
+
+	  CREATE INDEX IF NOT EXISTS items_categories_category_id ON "items_categories" ("category_id" ASC);
 	`
 }
 
@@ -168,7 +169,7 @@ func DBLoadReposSync() {
 			if filepath.Ext(path) != ".md" {
 				return nil
 			}
-			item, err := loadItem(repoName, repoPath, path)
+			item, err := LoadItem(repoName, repoPath, path)
 			if err == nil {
 				insertItem(item)
 			} else {
@@ -230,7 +231,7 @@ func DBLoadRepo(repoName string) {
 	for w := 0; w < workers; w++ {
 		go func(id int, itempaths <-chan string) {
 			for path := range itempaths {
-				item, err := loadItem(repoName, repoPath, path)
+				item, err := LoadItem(repoName, repoPath, path)
 				if err == nil {
 					insertItem(item)
 				} else {
@@ -263,7 +264,9 @@ func DBLoadRepo(repoName string) {
 
 func reloadItem(repoName string, repoPath string, filename string) (Item, error) {
 	var item_id int64
+	isUpdate := false
 	if err := db.QueryRow("SELECT id FROM items WHERE repo = ? and source = ?", repoName, filename).Scan(&item_id); err == nil && item_id > 0 {
+		isUpdate = true
 		db.Exec("DELETE FROM items_tags WHERE item_id = ?", item_id)
 		db.Exec("DELETE FROM items_authors WHERE item_id = ?", item_id)
 		db.Exec("DELETE FROM frontmatter WHERE item_id = ?", item_id)
@@ -272,14 +275,78 @@ func reloadItem(repoName string, repoPath string, filename string) (Item, error)
 		slog.Warn(fmt.Sprintf("No existing file in repo %s source file %s\n", repoName, filename))
 	}
 
-	item, err := loadItem(repoName, repoPath, filename)
+	item, err := LoadItem(repoName, repoPath, filename)
 	if err == nil {
 		insertItem(item)
+
+		// Publish to ActivityPub if enabled and this is an ActivityPub-enabled repo
+		if ActivityPubManager != nil {
+			// Convert Item to BlogPost for ActivityPub
+			blogPost := ConvertItemToBlogPost(item)
+			if blogPost != nil {
+				if isUpdate {
+					err := ActivityPubManager.UpdatePost(blogPost)
+					if err != nil {
+						slog.Error("Failed to update post on ActivityPub", "error", err, "title", item.Title, "repo", repoName)
+					} else {
+						slog.Info("Post updated on ActivityPub", "title", item.Title, "repo", repoName)
+					}
+				} else {
+					err := ActivityPubManager.PublishPost(blogPost)
+					if err != nil {
+						slog.Error("Failed to publish post to ActivityPub", "error", err, "title", item.Title, "repo", repoName)
+					} else {
+						slog.Info("Post published to ActivityPub", "title", item.Title, "repo", repoName)
+					}
+				}
+			}
+		}
 	}
 	return item, err
 }
 
-func loadItem(repoName string, repoPath string, filename string) (Item, error) {
+// ConvertItemToBlogPost converts a database Item to ActivityPub BlogPost format
+func ConvertItemToBlogPost(item Item) *activitypub.BlogPost {
+	// Only convert items from ActivityPub-enabled repos
+	repoConfig := fmt.Sprintf("repos.%s.activitypub", item.Repo)
+	if viper.IsSet(repoConfig) && !viper.GetBool(repoConfig) {
+		return nil
+	}
+	if !viper.IsSet(repoConfig) && !viper.GetBool("activitypub.enabled") {
+		return nil
+	}
+
+	// Build post URL
+	baseURL := viper.GetString("rooturl")
+	if activityPubURL := viper.GetString("activitypub.rooturl"); activityPubURL != "" {
+		baseURL = activityPubURL
+	}
+	baseURL = strings.TrimSuffix(baseURL, "/")
+	postURL := fmt.Sprintf("%s/posts/%s", baseURL, item.Slug)
+
+	// Extract summary from frontmatter or HTML
+	summary := ""
+	if summaryVal, exists := item.Frontmatter["summary"]; exists {
+		summary = summaryVal
+	} else if descVal, exists := item.Frontmatter["description"]; exists {
+		summary = descVal
+	}
+
+	return &activitypub.BlogPost{
+		Title:           item.Title,
+		URL:             postURL,
+		HTMLContent:     item.Html,
+		MarkdownContent: item.Raw,
+		Summary:         summary,
+		PublishedAt:     item.Date,
+		Tags:            item.Categories, // Categories are used as tags
+		Authors:         item.Authors,
+		Repo:            item.Repo,
+		Slug:            item.Slug,
+	}
+}
+
+func LoadItem(repoName string, repoPath string, filename string) (Item, error) {
 	var item Item
 
 	item.Source = filename

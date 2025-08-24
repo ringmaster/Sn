@@ -127,6 +127,57 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 	commit, _ := repo.CommitObject(ref.Hash())
 	slog.Info("commit", "commit_text", commit, "commit_hash", ref.Hash())
 
+	// After git pull, reload repositories to pick up new files
+	slog.Info("Webhook: reloading repositories after git pull")
+
+	// Get list of files before reloading to detect new files for ActivityPub
+	existingFiles := make(map[string]bool)
+	for repoName := range viper.GetStringMap("repos") {
+		repoPath := ConfigPath(fmt.Sprintf("repos.%s.path", repoName))
+		if exists, err := afero.DirExists(Vfs, repoPath); err == nil && exists {
+			afero.Walk(Vfs, repoPath, func(path string, info os.FileInfo, _ error) error {
+				if !info.IsDir() && filepath.Ext(path) == ".md" {
+					existingFiles[path] = true
+				}
+				return nil
+			})
+		}
+	}
+
+	// Reload repositories
+	DBLoadRepos()
+
+	// Check for new files and trigger ActivityPub for them
+	if ActivityPubManager != nil {
+		for repoName := range viper.GetStringMap("repos") {
+			repoPath := ConfigPath(fmt.Sprintf("repos.%s.path", repoName))
+			if exists, err := afero.DirExists(Vfs, repoPath); err == nil && exists {
+				afero.Walk(Vfs, repoPath, func(path string, info os.FileInfo, _ error) error {
+					if !info.IsDir() && filepath.Ext(path) == ".md" {
+						// If this file wasn't in our existing files list, it's new
+						if !existingFiles[path] {
+							slog.Info("Webhook detected new file", "file", path, "repo", repoName)
+							// Load the item and publish to ActivityPub
+							item, err := LoadItem(repoName, repoPath, path)
+							if err == nil {
+								blogPost := ConvertItemToBlogPost(item)
+								if blogPost != nil {
+									err := ActivityPubManager.PublishPost(blogPost)
+									if err != nil {
+										slog.Error("Failed to publish webhook file to ActivityPub", "error", err, "file", path)
+									} else {
+										slog.Info("Published webhook file to ActivityPub", "file", path, "title", item.Title)
+									}
+								}
+							}
+						}
+					}
+					return nil
+				})
+			}
+		}
+	}
+
 	w.Header().Add("Content-Type", "text/plain")
 	w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 	w.Header().Add("X-Frame-Options", "SAMEORIGIN")

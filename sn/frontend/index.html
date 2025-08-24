@@ -99,8 +99,15 @@
           },
           async refresh() {
             try {
-              const response = await fetch("{{BASE_PATH}}/api");
-              this.data = await response.json();
+            const randomParam = '?nocache=' + Math.random();
+            const response = await fetch("{{BASE_PATH}}/api" + randomParam, {
+              headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+              }
+            });
+            this.data = await response.json();
               if (!this.data.loggedIn) {
                 window.PineconeRouter.context.redirect("/login");
               }

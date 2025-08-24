@@ -17,7 +17,8 @@ activitypub:
   enabled: false
   primary_user: test
   branch: activitypub-data
-  commit_interval_minutes: 10
+  commit_interval_minutes: 10 # Set to 0 for immediate commits (testing)
+  # master_key: "your-secret-key-here" # REQUIRED when enabled - stores encrypted keys
   # Optional overrides (if different from main config):
   # title: "Different ActivityPub Name"
   # rooturl: "https://public-domain.com/"

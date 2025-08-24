@@ -33,6 +33,12 @@ func NewManager(mainFs afero.Fs) (*Manager, error) {
 
 	slog.Info("Initializing ActivityPub services")
 
+	// Validate master key is provided
+	masterKey := viper.GetString("activitypub.master_key")
+	if masterKey == "" {
+		return nil, fmt.Errorf("activitypub.master_key is required when ActivityPub is enabled - set via config or SN_ACTIVITYPUB__MASTER_KEY environment variable")
+	}
+
 	// Initialize storage
 	storage, err := NewStorage(mainFs)
 	if err != nil {

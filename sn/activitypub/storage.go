@@ -1,8 +1,14 @@
 package activitypub
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path"
@@ -28,6 +34,7 @@ type Storage struct {
 	lastCommitTime  time.Time       // Last time we committed changes
 	commitInterval  time.Duration   // How long to wait before committing
 	gitAuth         *http.BasicAuth // Git authentication
+	masterKey       []byte          // Master key for encrypting sensitive data
 }
 
 // NewStorage creates a new ActivityPub storage instance
@@ -43,9 +50,20 @@ func NewStorage(mainFs afero.Fs) (*Storage, error) {
 		commitIntervalMinutes = 10
 	}
 
+	// Get master key for encryption
+	masterKeyStr := viper.GetString("activitypub.master_key")
+	if masterKeyStr == "" {
+		return nil, fmt.Errorf("activitypub.master_key is required when ActivityPub is enabled - set via config or SN_ACTIVITYPUB__MASTER_KEY environment variable")
+	}
+
+	// Derive a 32-byte key from the master key string using SHA-256
+	hash := sha256.Sum256([]byte(masterKeyStr))
+	masterKey := hash[:]
+
 	storage := &Storage{
 		mainFs:         mainFs,
 		commitInterval: time.Duration(commitIntervalMinutes) * time.Minute,
+		masterKey:      masterKey,
 	}
 
 	// Set up git authentication if available
@@ -343,14 +361,20 @@ func (s *Storage) LoadFollowing(username string) (map[string]*Following, error) 
 	return following, nil
 }
 
-// SaveKeys saves the cryptographic keys to storage
+// SaveKeys saves the cryptographic keys to storage (encrypted)
 func (s *Storage) SaveKeys(keys *KeyPair) error {
 	data, err := json.MarshalIndent(keys, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal keys: %w", err)
 	}
 
-	err = afero.WriteFile(s.activityPubFs, ".activitypub/keys.json", data, 0600)
+	// Encrypt the keys data
+	encryptedData, err := s.encrypt(data)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt keys: %w", err)
+	}
+
+	err = afero.WriteFile(s.activityPubFs, ".activitypub/keys.json", encryptedData, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to write keys file: %w", err)
 	}
@@ -359,7 +383,7 @@ func (s *Storage) SaveKeys(keys *KeyPair) error {
 	return nil
 }
 
-// LoadKeys loads the cryptographic keys from storage
+// LoadKeys loads the cryptographic keys from storage (decrypted)
 func (s *Storage) LoadKeys() (*KeyPair, error) {
 	exists, err := afero.Exists(s.activityPubFs, ".activitypub/keys.json")
 	if err != nil {
@@ -370,9 +394,15 @@ func (s *Storage) LoadKeys() (*KeyPair, error) {
 		return nil, nil
 	}
 
-	data, err := afero.ReadFile(s.activityPubFs, ".activitypub/keys.json")
+	encryptedData, err := afero.ReadFile(s.activityPubFs, ".activitypub/keys.json")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read keys file: %w", err)
+	}
+
+	// Decrypt the keys data
+	data, err := s.decrypt(encryptedData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt keys: %w", err)
 	}
 
 	var keys KeyPair
@@ -499,12 +529,30 @@ func (s *Storage) LoadComments(repo, slug string) ([]*Comment, error) {
 }
 
 // markPendingChanges marks that we have uncommitted changes
+// If commit interval is 0, commits immediately
 func (s *Storage) markPendingChanges() {
 	s.pendingChanges = true
+
+	// If commit interval is 0, commit immediately (useful for testing)
+	if s.commitInterval == 0 {
+		go func() {
+			err := s.commitChanges()
+			if err != nil {
+				slog.Error("Failed to commit ActivityPub changes immediately", "error", err)
+			}
+		}()
+	}
 }
 
 // commitProcessor runs in background to commit ActivityPub changes periodically
+// If commit interval is 0, this processor is effectively disabled since commits happen immediately
 func (s *Storage) commitProcessor() {
+	// If commit interval is 0, don't run periodic commits (they happen immediately)
+	if s.commitInterval == 0 {
+		slog.Info("ActivityPub commit processor disabled - using immediate commits")
+		return
+	}
+
 	ticker := time.NewTicker(1 * time.Minute) // Check every minute
 	defer ticker.Stop()
 
@@ -591,6 +639,66 @@ func (s *Storage) commitChanges() error {
 	s.pendingChanges = false
 	s.lastCommitTime = time.Now()
 	return nil
+}
+
+// encrypt encrypts data using AES-GCM with the master key
+func (s *Storage) encrypt(data []byte) ([]byte, error) {
+	block, err := aes.NewCipher(s.masterKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	ciphertext := gcm.Seal(nonce, nonce, data, nil)
+
+	// Base64 encode for storage
+	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(ciphertext)))
+	base64.StdEncoding.Encode(encoded, ciphertext)
+
+	return encoded, nil
+}
+
+// decrypt decrypts data using AES-GCM with the master key
+func (s *Storage) decrypt(encodedData []byte) ([]byte, error) {
+	// Base64 decode
+	ciphertext := make([]byte, base64.StdEncoding.DecodedLen(len(encodedData)))
+	n, err := base64.StdEncoding.Decode(ciphertext, encodedData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode base64: %w", err)
+	}
+	ciphertext = ciphertext[:n]
+
+	block, err := aes.NewCipher(s.masterKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	nonceSize := gcm.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+
+	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
+	data, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt: %w", err)
+	}
+
+	return data, nil
 }
 
 // mergeFromMain merges content changes from main branch

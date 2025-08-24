@@ -2,6 +2,34 @@
 
 Sn now includes built-in ActivityPub support, allowing your blog to participate in the federated social web (also known as the "Fediverse"). This means people can follow your blog from Mastodon, Pleroma, and other ActivityPub-compatible social networks.
 
+## Table of Contents
+
+- [Features](#features)
+- [Configuration](#configuration)
+  - [Minimal Setup](#minimal-setup)
+  - [Full Configuration Example](#full-configuration-example)
+  - [Configuration Rules](#configuration-rules)
+  - [Configuration Options](#configuration-options)
+  - [Example Scenarios](#example-scenarios)
+- [Storage Architecture](#storage-architecture)
+- [Usage](#usage)
+  - [Actor Discovery](#actor-discovery)
+  - [Publishing Posts](#publishing-posts)
+- [Multi-Author Posts](#multi-author-posts)
+  - [How Multi-Author Works](#how-multi-author-works)
+  - [Creating Multi-Author Posts](#creating-multi-author-posts)
+  - [Multi-Author Testing](#multi-author-testing)
+- [Receiving Comments](#receiving-comments)
+- [Development and Integration](#development-and-integration)
+- [Security](#security)
+- [Moderation](#moderation)
+- [Environment Variables](#environment-variables)
+- [Troubleshooting](#troubleshooting)
+- [Performance Considerations](#performance-considerations)
+- [Compatibility](#compatibility)
+- [Contributing](#contributing)
+- [Resources](#resources)
+
 ## Features
 
 - **Actor Profile**: Each user becomes an ActivityPub actor that can be discovered and followed
@@ -24,6 +52,7 @@ rooturl: "https://myblog.com/"
 activitypub:
   enabled: true
   primary_user: "admin"
+  master_key: "your-secret-master-key-here"
 
 users:
   admin:
@@ -43,6 +72,7 @@ rooturl: "https://myblog.example.com/"
 activitypub:
   enabled: true
   primary_user: "admin"
+  master_key: "your-secret-master-key-here"
   branch: "activitypub-data"
   commit_interval_minutes: 10
   # Optional overrides (only specify if different from main config):
@@ -96,10 +126,11 @@ No separate `site` section needed - all ActivityPub settings live together.
 #### Core Settings (Required)
 - `activitypub.enabled`: Enable/disable ActivityPub functionality (default: false)
 - `activitypub.primary_user`: Which user should be the main ActivityPub actor
+- `activitypub.master_key`: Master key for encrypting ActivityPub keys (REQUIRED when enabled)
 
 #### ActivityPub Settings (Optional)
 - `activitypub.branch`: Git branch name for storing ActivityPub data (default: "activitypub-data")
-- `activitypub.commit_interval_minutes`: How often to commit ActivityPub changes (default: 10)
+- `activitypub.commit_interval_minutes`: How often to commit ActivityPub changes (default: 10, set to 0 for immediate commits - useful for testing)
 
 #### ActivityPub Overrides (Optional)
 - `activitypub.title`: Override site name for ActivityPub (different from `title`)
@@ -123,7 +154,9 @@ rooturl: "http://localhost:8080/"
 activitypub:
   enabled: true
   primary_user: "dev"
-  insecure: true  # Allow HTTP for local testing
+  master_key: "dev-master-key-123"
+  commit_interval_minutes: 0  # Immediate commits for testing
+  insecure: true              # Allow HTTP for local testing
 
 users:
   dev:
@@ -139,6 +172,7 @@ rooturl: "https://internal.company.com/"
 activitypub:
   enabled: true
   primary_user: "editor"
+  master_key: "production-master-key-very-secure"
   # Public federation uses different domain:
   title: "ACME Corp Tech Blog"
   rooturl: "https://blog.company.com/"
@@ -212,7 +246,11 @@ When ActivityPub is enabled for a repo, new posts are automatically:
 2. **Updated**: Changes sent as `Update` activities from the same author
 3. **Deleted**: Deletions sent as `Delete` activities (may fall back to repo owner)
 
-#### Multi-Author Posts
+## Multi-Author Posts
+
+Sn supports multi-author posts with proper ActivityPub attribution and federation.
+
+### How Multi-Author Works
 
 Posts can have multiple authors specified in their frontmatter:
 
@@ -225,22 +263,158 @@ authors:
 ---
 ```
 
-For multi-author posts:
-- The **primary author** (first in the list) becomes the ActivityPub actor who publishes the post
-- All valid authors are included in the `attributedTo` field of the ActivityPub object
-- The post is delivered to followers of the primary author
-- Co-authors must exist in the `users` configuration to be included
+#### Author Resolution Priority
 
-#### Author Resolution
-
-The system determines the publishing author using this priority:
+The system determines the publishing author using this order:
 
 1. **Post Authors**: Uses the first valid author from the post's frontmatter
 2. **Repo Owner**: Falls back to the repo's configured owner
 3. **Primary User**: Falls back to the global `activitypub.primary_user`
 4. **First User**: Falls back to the first user in the configuration
 
-### Receiving Comments
+#### ActivityPub Behavior
+
+**Single Author Post:**
+```yaml
+authors:
+  - alice
+```
+- **Actor**: `@alice@domain.com` (publishes the post)
+- **AttributedTo**: `"https://domain.com/@alice"`
+- **Delivered to**: Alice's followers
+
+**Multi-Author Post:**
+```yaml
+authors:
+  - alice  # Primary author
+  - bob    # Co-author
+```
+- **Actor**: `@alice@domain.com` (primary author publishes)
+- **AttributedTo**: `["https://domain.com/@alice", "https://domain.com/@bob"]`
+- **CC**: Both Alice's and Bob's followers
+- **Delivered to**: Alice's followers (primary author)
+
+**Invalid Author Fallback:**
+```yaml
+authors:
+  - nonexistent_user
+```
+- **Fallback to**: Repo owner with warning logged
+- **Actor**: `@admin@domain.com` (or configured fallback)
+
+### Creating Multi-Author Posts
+
+#### Via Web Interface
+- Login as any user at `/_/frontend`
+- Create a new post - automatically uses logged-in user as author
+- Post federates from that user's ActivityPub actor
+
+#### Via Markdown File
+```yaml
+---
+title: "Team Collaboration"
+authors:
+  - alice
+  - bob
+  - charlie
+---
+
+This post was written by our entire team working together.
+```
+
+### Multi-Author Federation Example
+
+The ActivityPub object for a multi-author post looks like:
+
+```json
+{
+  "@context": ["https://www.w3.org/ns/activitystreams"],
+  "type": "Article",
+  "attributedTo": [
+    "https://myblog.com/@alice",
+    "https://myblog.com/@bob"
+  ],
+  "name": "Collaborative Post",
+  "content": "Post content...",
+  "to": ["https://www.w3.org/ns/activitystreams#Public"],
+  "cc": [
+    "https://myblog.com/@alice/followers",
+    "https://myblog.com/@bob/followers"
+  ]
+}
+```
+
+The Create Activity has:
+- **Actor**: The primary author (alice)
+- **Object**: The article with multiple attributedTo values
+- **CC**: Followers of all authors for maximum reach
+
+### Per-User Storage
+
+Each user maintains separate ActivityPub data:
+
+```
+.activitypub/users/
+├── alice/
+│   ├── followers.json
+│   └── following.json
+├── bob/
+│   ├── followers.json
+│   └── following.json
+└── admin/
+    ├── followers.json
+    └── following.json
+```
+
+### Multi-Author Testing
+
+#### Test Configuration
+```yaml
+title: "Multi-Author Blog"
+rooturl: "https://yourdomain.com/"
+
+activitypub:
+  enabled: true
+  primary_user: "admin"
+  master_key: "test-master-key-123"
+  commit_interval_minutes: 0  # Immediate commits for testing
+
+users:
+  admin:
+    displayName: "Site Admin"
+    passwordhash: "$2a$10$..."
+  alice:
+    displayName: "Alice Johnson"
+    passwordhash: "$2a$10$..."
+  bob:
+    displayName: "Bob Wilson"
+    passwordhash: "$2a$10$..."
+```
+
+#### Test Endpoints
+```bash
+# Test each user's profile
+curl -H "Accept: application/activity+json" https://yourdomain.com/@alice
+curl -H "Accept: application/activity+json" https://yourdomain.com/@bob
+
+# Check separate follower lists
+curl -H "Accept: application/activity+json" https://yourdomain.com/@alice/followers
+curl -H "Accept: application/activity+json" https://yourdomain.com/@bob/followers
+```
+
+#### Common Issues
+- **"No valid authors found"**: Add authors to `users` config section
+- **"Failed to publish to ActivityPub"**: Restart Sn to generate keys
+- **Posts from wrong author**: Check logs for fallback warnings
+
+### Multi-Author Best Practices
+
+- **Primary Author First**: List the main author first (they become the ActivityPub actor)
+- **Valid Users Only**: Only include authors who exist in the `users` configuration
+- **Consider Followers**: Primary author's followers will see the post
+- **Consistent Usernames**: Use consistent usernames between config and frontmatter
+
+## Receiving Comments
 
 Comments/replies from the fediverse are:
 
@@ -336,7 +510,53 @@ All ActivityPub requests are signed using RSA-SHA256 HTTP signatures. Sn:
 - **Generates** 2048-bit RSA keys automatically on first run
 - **Signs** all outgoing requests
 - **Verifies** signatures on incoming requests
-- **Stores** keys securely in the ActivityPub storage
+- **Stores** keys encrypted using AES-GCM with the master key
+
+### Security Model
+
+ActivityPub keys are stored encrypted to protect against unauthorized access:
+
+#### Master Key Requirements
+- **Required Configuration**: `activitypub.master_key` must be set when ActivityPub is enabled
+- **Application Won't Start**: Missing master key prevents ActivityPub initialization
+- **Environment Override**: Can be set via `SN_ACTIVITYPUB__MASTER_KEY` environment variable
+- **Key Derivation**: Master key string is hashed with SHA-256 to create 32-byte AES key
+
+#### Encryption Details
+- **Algorithm**: AES-256-GCM (authenticated encryption)
+- **Storage**: RSA keys encrypted and stored in `.activitypub/keys.json`
+- **Nonce**: Random nonce generated for each encryption operation
+- **Base64 Encoding**: Encrypted data is base64-encoded for safe file storage
+- **File Permissions**: Key file stored with 0600 permissions (owner read/write only)
+
+#### Key Management Best Practices
+- **Unique Master Keys**: Use different master keys for development, staging, and production
+- **Key Length**: Use long, randomly generated master keys (32+ characters recommended)
+- **Environment Variables**: Store master key in environment variables, not config files
+- **Backup**: Securely backup master key - losing it makes existing encrypted keys unrecoverable
+- **Rotation**: If master key is compromised, regenerate ActivityPub keys with new master key
+
+#### Generating Secure Master Keys
+```bash
+# Generate a secure random master key (Linux/macOS)
+openssl rand -base64 32
+
+# Alternative using /dev/urandom
+head -c 32 /dev/urandom | base64
+
+# Generate using Python
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Example usage:
+```bash
+# Set via environment variable (recommended)
+export SN_ACTIVITYPUB__MASTER_KEY="$(openssl rand -base64 32)"
+./sn serve
+
+# Or set in config (less secure)
+# activitypub.master_key: "your-generated-key-here"
+```
 
 ### Rate Limiting
 ActivityPub endpoints include built-in protections:
@@ -357,6 +577,11 @@ The codebase includes reserved interfaces for two-tier comment moderation:
 These systems are designed but not yet implemented, allowing for future moderation capabilities without architectural changes.
 
 ## Environment Variables
+
+### Required for ActivityPub
+```bash
+SN_ACTIVITYPUB__MASTER_KEY=your-secret-master-key
+```
 
 ### Required for Git Mode with Write Access
 ```bash
@@ -389,7 +614,8 @@ title: "My Blog"
 rooturl: "https://myblog.com/"
 activitypub:
   enabled: true
-  icon: "/icon.png"     # ✅ Moved here (ActivityPub-specific)
+  master_key: "your-secret-key"  # ✅ Required for encryption
+  icon: "/icon.png"              # ✅ Moved here (ActivityPub-specific)
 ```
 
 ## Troubleshooting
@@ -397,15 +623,35 @@ activitypub:
 ### ActivityPub Not Working
 
 1. **Check Configuration**: Ensure `activitypub.enabled: true`
-2. **Verify Users**: At least one user must be configured
-3. **Check Logs**: Look for ActivityPub initialization messages
-4. **Test WebFinger**: Try accessing `/.well-known/webfinger?resource=acct:user@yourdomain.com`
+2. **Master Key Missing**: Ensure `activitypub.master_key` is set (required)
+3. **Verify Users**: At least one user must be configured
+4. **Check Logs**: Look for ActivityPub initialization messages
+5. **Test WebFinger**: Try accessing `/.well-known/webfinger?resource=acct:user@yourdomain.com`
 
 ### Git Branch Issues
 
 1. **Missing Branch**: The ActivityPub branch is created automatically on first run
 2. **Permission Issues**: Ensure git credentials have push access
 3. **Conflicts**: ActivityPub data commits are designed to avoid conflicts
+
+### Key and Encryption Issues
+
+1. **Missing Master Key**: `activitypub.master_key is required` error
+   - Set `activitypub.master_key` in config or `SN_ACTIVITYPUB__MASTER_KEY` env var
+   - Application won't start without this value when ActivityPub is enabled
+
+2. **Key Decryption Failed**: `failed to decrypt keys` error
+   - Master key changed but existing encrypted keys.json exists
+   - Delete `.activitypub/keys.json` to regenerate with new master key
+   - Or restore original master key value
+
+3. **Key Generation Failed**: `failed to generate RSA key` error
+   - Insufficient system entropy - restart and try again
+   - Check system permissions for random number generation
+
+4. **File Permission Issues**: Can't read/write keys.json
+   - Ensure `.activitypub/` directory has proper permissions
+   - Keys file should be 0600 (owner read/write only)
 
 ### Federation Issues
 
@@ -416,10 +662,12 @@ activitypub:
 ### Performance Considerations
 
 ### Batched Commits
-ActivityPub data is committed periodically (not immediately) to avoid:
+ActivityPub data is normally committed periodically to avoid:
 - **Excessive Git History**: Too many micro-commits
 - **Performance Impact**: Frequent I/O operations
 - **Remote Pressure**: Constant pushes to git remote
+
+For testing, set `commit_interval_minutes: 0` to commit immediately after each change.
 
 ### Background Processing
 - **Activity Delivery**: Sent to followers in background

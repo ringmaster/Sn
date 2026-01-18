@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(du:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(wc:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(go tool cover:*)",
+      "WebFetch(domain:asymptomatic.net)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "mcp-gopls"
+  ]
+}

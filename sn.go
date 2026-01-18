@@ -137,6 +137,16 @@ func regenKeys() {
 		return
 	}
 
+	// Initialize database (required for ActivityPub)
+	sn.DBConnect()
+
+	// Initialize ActivityPub (required before we can regenerate keys)
+	err = sn.InitializeActivityPub()
+	if err != nil {
+		slog.Error(fmt.Sprintf("Error initializing ActivityPub: %v", err))
+		return
+	}
+
 	// Check if ActivityPub is enabled
 	if sn.ActivityPubManager == nil || !sn.ActivityPubManager.IsEnabled() {
 		slog.Error("ActivityPub is not enabled - cannot regenerate keys")

@@ -23,6 +23,7 @@ import (
 	"github.com/arpitgogia/rake"
 	attributes "github.com/mdigger/goldmark-attributes"
 	"github.com/ringmaster/Sn/sn/activitypub"
+	"github.com/ringmaster/Sn/sn/util"
 	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 	"github.com/yuin/goldmark"
@@ -324,12 +325,15 @@ func ConvertItemToBlogPost(item Item) *activitypub.BlogPost {
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	postURL := fmt.Sprintf("%s/posts/%s", baseURL, item.Slug)
 
-	// Extract summary from frontmatter or HTML
+	// Extract summary from frontmatter or auto-generate from content
 	summary := ""
 	if summaryVal, exists := item.Frontmatter["summary"]; exists {
 		summary = summaryVal
 	} else if descVal, exists := item.Frontmatter["description"]; exists {
 		summary = descVal
+	} else {
+		// Auto-generate summary from HTML content
+		summary = GenerateSummaryFromHTML(item.Html)
 	}
 
 	return &activitypub.BlogPost{
@@ -344,6 +348,11 @@ func ConvertItemToBlogPost(item Item) *activitypub.BlogPost {
 		Repo:            item.Repo,
 		Slug:            item.Slug,
 	}
+}
+
+// GenerateSummaryFromHTML creates a summary from HTML content
+func GenerateSummaryFromHTML(htmlContent string) string {
+	return util.GenerateSummaryFromHTML(htmlContent)
 }
 
 func LoadItem(repoName string, repoPath string, filename string) (Item, error) {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ringmaster/Sn/sn/util"
 	"github.com/spf13/viper"
 )
 
@@ -555,6 +556,38 @@ func (os *OutboxService) getActivitiesForPage(username string, pageNum int) []in
 			attribution = actorURL
 		}
 
+		// Create a temporary Item to use existing summary logic
+		tempItem := struct {
+			Html        string
+			Frontmatter map[string]string
+		}{
+			Html:        html,
+			Frontmatter: make(map[string]string),
+		}
+
+		// Get frontmatter for this item to extract summary
+		frontmatterRows, err := os.db.Query("SELECT fieldname, value FROM frontmatter WHERE item_id = ?", id)
+		if err == nil {
+			for frontmatterRows.Next() {
+				var fieldname, value string
+				if err := frontmatterRows.Scan(&fieldname, &value); err == nil {
+					tempItem.Frontmatter[fieldname] = value
+				}
+			}
+			frontmatterRows.Close()
+		}
+
+		// Generate summary using same logic as ConvertItemToBlogPost
+		summary := ""
+		if summaryVal, exists := tempItem.Frontmatter["summary"]; exists {
+			summary = summaryVal
+		} else if descVal, exists := tempItem.Frontmatter["description"]; exists {
+			summary = descVal
+		} else {
+			// Auto-generate summary from HTML content
+			summary = util.GenerateSummaryFromHTML(tempItem.Html)
+		}
+
 		article := map[string]interface{}{
 			"@context":     ActivityPubContext,
 			"id":           postURL,
@@ -565,6 +598,11 @@ func (os *OutboxService) getActivitiesForPage(username string, pageNum int) []in
 			"published":    publishedTime.Format(time.RFC3339),
 			"url":          postURL,
 			"tag":          tags,
+		}
+
+		// Add summary if it exists (non-empty)
+		if summary != "" {
+			article["summary"] = summary
 		}
 
 		// Create Create activity wrapping the Article
@@ -686,20 +724,6 @@ func (os *OutboxService) getServerActivitiesForPage(pageNum int) []interface{} {
 	// For now, return empty slice as placeholder
 	slog.Info("Getting server activities for page", "page", pageNum, "placeholder", true)
 	return []interface{}{}
-}
-
-// BlogPost represents a blog post for ActivityPub publishing
-type BlogPost struct {
-	Title           string
-	URL             string
-	HTMLContent     string
-	MarkdownContent string
-	Summary         string
-	PublishedAt     time.Time
-	Tags            []string
-	Authors         []string // Post authors from frontmatter
-	Repo            string
-	Slug            string
 }
 
 func convertTagsToActivityPub(tags []string) []Tag {

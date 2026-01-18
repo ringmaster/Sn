@@ -273,3 +273,17 @@ var ActivityPubContext = []string{
 	"https://www.w3.org/ns/activitystreams",
 	"https://w3id.org/security/v1",
 }
+
+// BlogPost represents a blog post for ActivityPub publishing
+type BlogPost struct {
+	Title           string
+	URL             string
+	HTMLContent     string
+	MarkdownContent string
+	Summary         string
+	PublishedAt     time.Time
+	Tags            []string
+	Authors         []string // Post authors from frontmatter
+	Repo            string
+	Slug            string
+}

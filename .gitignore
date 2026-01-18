@@ -31,3 +31,4 @@ sn/Sn
 *.DS_Store
 *.log
 .activitypub
+asy/*

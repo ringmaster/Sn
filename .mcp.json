@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mcp-gopls": {
+      "command": "mcp-gopls",
+      "args": [
+        "-workspace",
+        "/Users/ringmaster/Projects/Sn"
+      ]
+    }
+  }
+}

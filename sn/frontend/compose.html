@@ -256,12 +256,10 @@ init() {
                   id="postRepo"
                   name="repo"
                   x-model="repo"
-                  x-init="repo = $store.api.data.repos[0]"
-                  x-data="{ repos: $store.api.data.repos }"
+                  x-effect="if (!repo && Object.keys($store.api.data.repos || {}).length) repo = Object.keys($store.api.data.repos)[0]"
                 >
                   <template
-                    label="Repos"
-                    x-for="(repo, repoName) in repos"
+                    x-for="repoName in Object.keys($store.api.data.repos || {})"
                     :key="repoName"
                   >
                     <option x-text="repoName" :value="repoName"></option>

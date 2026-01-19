@@ -40,8 +40,11 @@
     }
   },
   editPost(post) {
+    // Set Alpine store for SPA navigation
     Alpine.store('editPost').repo = post.repo;
     Alpine.store('editPost').slug = post.slug;
+    // Also save to sessionStorage for page reload support
+    sessionStorage.setItem('editPost', JSON.stringify({ repo: post.repo, slug: post.slug }));
     window.PineconeRouter.context.navigate('/compose');
   },
   formatDate(dateStr) {
@@ -63,41 +66,32 @@
     }
   }
 }">
-  <h1 class="title">Posts</h1>
+  <nav class="panel">
+    <p class="panel-tabs">
+      <template x-for="repoName in $store.api.repoNames" :key="repoName">
+        <a :class="selectedRepo === repoName ? 'is-active' : ''"
+           @click="selectedRepo = repoName"
+           x-text="repoName"></a>
+      </template>
+    </p>
 
-  <div class="field">
-    <label class="label">Repository</label>
-    <div class="control">
-      <div class="select">
-        <select x-model="selectedRepo">
-          <template x-for="repoName in $store.api.repoNames" :key="repoName">
-            <option x-text="repoName" :value="repoName"></option>
-          </template>
-        </select>
-      </div>
-    </div>
-  </div>
-
-  <div x-show="loading" class="has-text-centered py-4">
-    <span class="icon is-large">
-      <i class="fas fa-spinner fa-pulse fa-2x"></i>
-    </span>
-  </div>
-
-  <div x-show="!loading">
-    <div x-show="posts.length === 0 && selectedRepo" class="notification is-info is-light">
-      <p>No posts found in this repository.</p>
+    <div x-show="loading" class="panel-block has-text-centered">
+      <span class="icon">
+        <i class="fas fa-spinner fa-pulse"></i>
+      </span>
+      <span>Loading...</span>
     </div>
 
-    <div class="panel is-primary" x-show="posts.length > 0">
-      <p class="panel-heading">
-        <span x-text="total"></span> posts in <span x-text="selectedRepo"></span>
-      </p>
-      <template x-for="post in posts" :key="post.id">
-        <a class="panel-block is-flex is-flex-direction-column is-align-items-start" @click="editPost(post)">
+    <div x-show="!loading && posts.length === 0 && selectedRepo" class="panel-block">
+      <p class="has-text-grey">No posts found in this repository.</p>
+    </div>
+
+    <template x-for="post in posts" :key="post.id">
+      <a class="panel-block" @click="editPost(post)">
+        <div class="is-flex is-flex-direction-column is-align-items-start" style="width: 100%;">
           <div class="is-flex is-justify-content-space-between is-align-items-center" style="width: 100%;">
-            <strong x-text="post.title" class="has-text-dark"></strong>
-            <span class="icon has-text-grey">
+            <strong x-text="post.title"></strong>
+            <span class="icon has-text-grey is-small">
               <i class="fas fa-edit"></i>
             </span>
           </div>
@@ -107,18 +101,20 @@
               <span> &bull; <span x-text="post.authors.join(', ')"></span></span>
             </template>
           </div>
-        </a>
-      </template>
-    </div>
+        </div>
+      </a>
+    </template>
 
-    <nav class="pagination is-centered" role="navigation" aria-label="pagination" x-show="totalPages > 1">
-      <a class="pagination-previous" :disabled="currentPage <= 1" @click="prevPage">Previous</a>
-      <a class="pagination-next" :disabled="currentPage >= totalPages" @click="nextPage">Next page</a>
-      <ul class="pagination-list">
-        <li>
-          <span class="pagination-link is-current" x-text="'Page ' + currentPage + ' of ' + totalPages"></span>
-        </li>
-      </ul>
-    </nav>
-  </div>
+    <div class="panel-block" x-show="totalPages > 1">
+      <nav class="pagination is-small is-centered" role="navigation" aria-label="pagination" style="width: 100%;">
+        <a class="pagination-previous" :disabled="currentPage <= 1" @click="prevPage">Previous</a>
+        <a class="pagination-next" :disabled="currentPage >= totalPages" @click="nextPage">Next</a>
+        <ul class="pagination-list">
+          <li>
+            <span class="pagination-link is-current" x-text="currentPage + ' / ' + totalPages"></span>
+          </li>
+        </ul>
+      </nav>
+    </div>
+  </nav>
 </div>

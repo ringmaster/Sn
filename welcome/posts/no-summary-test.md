@@ -1,10 +1,13 @@
 ---
 title: Test Post Without Summary
 slug: no-summary-test
-date: 2025-08-24
-categories: [testing, auto-summary]
+date: 2026-01-19 15:13:11
+tags:
+  - testing
+  - auto-summary
+hero: 
 authors:
-    - test
+  - test
 ---
 
 # Test Post Without Summary

@@ -101,6 +101,8 @@ clearForm() {
   if (this.easyMDE) {
     this.easyMDE.value('');
   }
+  // Clear sessionStorage when starting a new post
+  sessionStorage.removeItem('editPost');
 },
 submitPost() {
   const postContent = {
@@ -152,35 +154,48 @@ submitPost() {
 async init() {
   $watch('title', () => this.updateSlug());
   this.slugPattern = Alpine.store('api').data.slugPattern || this.slugPattern;
-  BulmaTagsInput.attach();
 
-  // Check store for edit mode BEFORE initializing EasyMDE
+  // Check Alpine store first (SPA navigation), then sessionStorage (page reload)
   const editStore = Alpine.store('editPost');
-  if (editStore && editStore.repo && editStore.slug) {
-    // Fetch content and populate form fields before EasyMDE init
+  const savedEdit = JSON.parse(sessionStorage.getItem('editPost') || 'null');
+
+  let editRepo = (editStore && editStore.repo) || (savedEdit && savedEdit.repo);
+  let editSlug = (editStore && editStore.slug) || (savedEdit && savedEdit.slug);
+
+  if (editRepo && editSlug) {
+    // Fetch content and populate form fields before component init
     try {
-      const response = await fetch(`{{BASE_PATH}}/api/repo/${encodeURIComponent(editStore.repo)}/${encodeURIComponent(editStore.slug)}`);
+      const response = await fetch(`{{BASE_PATH}}/api/repo/${encodeURIComponent(editRepo)}/${encodeURIComponent(editSlug)}`);
       if (response.ok) {
         const data = await response.json();
         this.title = data.title;
         this.slug = data.slug;
-        this.tags = data.tags;
         this.hero = data.hero || '';
         this.date = data.date || '';
         this.content = data.content;
-        this.repo = editStore.repo;
-        this.editingSlug = editStore.slug;
-        this.editingRepo = editStore.repo;
+        this.repo = editRepo;
+        this.editingSlug = editSlug;
+        this.editingRepo = editRepo;
         this.isEditing = true;
         this.customSlug = true;
-        // Set textarea value directly before EasyMDE takes over
+        // Set input values directly before components take over
         document.getElementById('postContent').value = data.content;
+        // Set tags on input only - BulmaTagsInput will read it, don't set this.tags to avoid x-model conflict
+        document.getElementById('postTags').value = data.tags || '';
+
+        // Save to sessionStorage for page reload support
+        sessionStorage.setItem('editPost', JSON.stringify({ repo: editRepo, slug: editSlug }));
       }
     } catch (error) {
       console.error('Error loading post:', error);
     }
-    editStore.clear();
+    // Clear the Alpine store
+    if (editStore) {
+      editStore.clear();
+    }
   }
+
+  BulmaTagsInput.attach();
 
   const easyMDE = new EasyMDE({
     uploadImage: true,

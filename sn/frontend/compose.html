@@ -14,6 +14,10 @@
     showSlugPattern: false,
     slugPattern: 'YYYY-MM-DD-title',
     hero: '',
+    isEditing: false,
+    editingSlug: '',
+    editingRepo: '',
+    easyMDE: null,
 generateSlug(title) {
   slugPattern = this.slugPattern;
 
@@ -61,7 +65,7 @@ slugify(title) {
     .replace(/-+$/, '');
 },
 updateSlug() {
-  if (!this.customSlug) {
+  if (!this.customSlug && !this.isEditing) {
     this.slug = this.generateSlug(this.title);
   }
 },
@@ -83,14 +87,28 @@ selectUnsplashImage() {
 showDatePicker() {
   this.showDatePicker = true;
 },
+clearForm() {
+  this.title = '';
+  this.slug = '';
+  this.tags = '';
+  this.hero = '';
+  this.date = '';
+  this.content = '';
+  this.isEditing = false;
+  this.editingSlug = '';
+  this.editingRepo = '';
+  this.customSlug = false;
+  if (this.easyMDE) {
+    this.easyMDE.value('');
+  }
+},
 submitPost() {
   const postContent = {
     title: this.title,
-    slug: this.slug,
+    slug: this.isEditing ? this.editingSlug : this.slug,
     content: this.content,
-    tags: this.tags || document.getElementById('postTags').BulmaTagsInput().value
-    ,
-    repo: document.getElementById('postRepo').value,
+    tags: this.tags || document.getElementById('postTags').BulmaTagsInput().value,
+    repo: this.isEditing ? this.editingRepo : document.getElementById('postRepo').value,
     hero: this.hero,
   };
 
@@ -104,13 +122,14 @@ submitPost() {
     return;
   }
 
-  if (this.repo == '') {
+  if (!this.isEditing && postContent.repo == '') {
     bulmaToast.toast({ message: 'Repo is required', type: 'is-warning' });
     return;
   }
- 
+
+  const method = this.isEditing ? 'PUT' : 'POST';
   fetch(`{{BASE_PATH}}/api/repo/${postContent.repo}/${postContent.slug}`, {
-    method: 'POST',
+    method: method,
     headers: {
       'Content-Type': 'application/json',
     },
@@ -118,25 +137,56 @@ submitPost() {
   })
     .then((response) => {
       if (response.ok) {
-        bulmaToast.toast({ message: 'Post submitted', type: 'is-success' });
+        const msg = this.isEditing ? 'Post updated' : 'Post submitted';
+        bulmaToast.toast({ message: msg, type: 'is-success' });
       } else {
-        bulmaToast.toast({ message: 'Submission failed', type: 'is-error' });
+        const msg = this.isEditing ? 'Update failed' : 'Submission failed';
+        bulmaToast.toast({ message: msg, type: 'is-danger' });
       }
     })
     .catch((error) => {
-      bulmaToast.toast({ message: 'There was an error submitting the post', type: 'is-error' });
+      bulmaToast.toast({ message: 'There was an error submitting the post', type: 'is-danger' });
       console.error('Error:', error);
     });
 },
-init() {
+async init() {
   $watch('title', () => this.updateSlug());
   this.slugPattern = Alpine.store('api').data.slugPattern || this.slugPattern;
   BulmaTagsInput.attach();
+
+  // Check store for edit mode BEFORE initializing EasyMDE
+  const editStore = Alpine.store('editPost');
+  if (editStore && editStore.repo && editStore.slug) {
+    // Fetch content and populate form fields before EasyMDE init
+    try {
+      const response = await fetch(`{{BASE_PATH}}/api/repo/${encodeURIComponent(editStore.repo)}/${encodeURIComponent(editStore.slug)}`);
+      if (response.ok) {
+        const data = await response.json();
+        this.title = data.title;
+        this.slug = data.slug;
+        this.tags = data.tags;
+        this.hero = data.hero || '';
+        this.date = data.date || '';
+        this.content = data.content;
+        this.repo = editStore.repo;
+        this.editingSlug = editStore.slug;
+        this.editingRepo = editStore.repo;
+        this.isEditing = true;
+        this.customSlug = true;
+        // Set textarea value directly before EasyMDE takes over
+        document.getElementById('postContent').value = data.content;
+      }
+    } catch (error) {
+      console.error('Error loading post:', error);
+    }
+    editStore.clear();
+  }
+
   const easyMDE = new EasyMDE({
-    uploadImage: true, 
+    uploadImage: true,
     element: document.getElementById('postContent'),
     imageAccept: ['image/jpeg'],
-    toolbar: ['bold', 'italic', 'heading', '|', 'quote', 'unordered-list', 'ordered-list', '|', 'link', 'image', 
+    toolbar: ['bold', 'italic', 'heading', '|', 'quote', 'unordered-list', 'ordered-list', '|', 'link', 'image',
     {
       name: 'upload',
       action: (editor) => {
@@ -176,10 +226,10 @@ init() {
       });
     },
   });
+  this.easyMDE = easyMDE;
   easyMDE.codemirror.on('change', () => {
     this.content = easyMDE.value();
   });
-  console.log('EasyMDE initialized');
 }
 
 }"
@@ -256,10 +306,10 @@ init() {
                   id="postRepo"
                   name="repo"
                   x-model="repo"
-                  x-effect="if (!repo && Object.keys($store.api.data.repos || {}).length) repo = Object.keys($store.api.data.repos)[0]"
+                  x-effect="if (!repo && $store.api.repoNames.length) repo = $store.api.repoNames[0]"
                 >
                   <template
-                    x-for="repoName in Object.keys($store.api.data.repos || {})"
+                    x-for="repoName in $store.api.repoNames"
                     :key="repoName"
                   >
                     <option x-text="repoName" :value="repoName"></option>
@@ -357,12 +407,13 @@ init() {
           </div>
           <div class="control">
             <button
-              class="button is-primary has-tooltip-arrow"
+              class="button has-tooltip-arrow"
+              :class="isEditing ? 'is-warning' : 'is-primary'"
               x-on:click="submitPost"
               :data-tooltip="$store.api.data.gitStatus"
               :disabled="!$store.api.data.gitCredentialsValid"
             >
-              Submit
+              <span x-text="isEditing ? 'Update' : 'Submit'"></span>
             </button>
           </div>
           <!-- Add more buttons here if needed -->

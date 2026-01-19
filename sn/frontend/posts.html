@@ -1,3 +1,124 @@
-<div>
-  <h1 class="title">Post List</h1>
+<div x-data="{
+  posts: [],
+  currentPage: 1,
+  totalPages: 1,
+  total: 0,
+  perPage: 10,
+  selectedRepo: '',
+  loading: false,
+  async fetchPosts() {
+    if (!this.selectedRepo) return;
+    this.loading = true;
+    try {
+      const response = await fetch(`{{BASE_PATH}}/api/posts?repo=${encodeURIComponent(this.selectedRepo)}&page=${this.currentPage}&per_page=${this.perPage}`);
+      if (response.ok) {
+        const data = await response.json();
+        this.posts = data.items || [];
+        this.currentPage = data.page;
+        this.totalPages = data.pages;
+        this.total = data.total;
+      } else {
+        bulmaToast.toast({ message: 'Failed to load posts', type: 'is-danger' });
+      }
+    } catch (error) {
+      console.error('Error fetching posts:', error);
+      bulmaToast.toast({ message: 'Error loading posts', type: 'is-danger' });
+    } finally {
+      this.loading = false;
+    }
+  },
+  prevPage() {
+    if (this.currentPage > 1) {
+      this.currentPage--;
+      this.fetchPosts();
+    }
+  },
+  nextPage() {
+    if (this.currentPage < this.totalPages) {
+      this.currentPage++;
+      this.fetchPosts();
+    }
+  },
+  editPost(post) {
+    Alpine.store('editPost').repo = post.repo;
+    Alpine.store('editPost').slug = post.slug;
+    window.PineconeRouter.context.navigate('/compose');
+  },
+  formatDate(dateStr) {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  },
+  init() {
+    $watch('$store.api.repoNames', (repoNames) => {
+      if (!this.selectedRepo && repoNames && repoNames.length > 0) {
+        this.selectedRepo = repoNames[0];
+      }
+    });
+    $watch('selectedRepo', () => {
+      this.currentPage = 1;
+      this.fetchPosts();
+    });
+    if (this.$store.api.repoNames.length > 0) {
+      this.selectedRepo = this.$store.api.repoNames[0];
+    }
+  }
+}">
+  <h1 class="title">Posts</h1>
+
+  <div class="field">
+    <label class="label">Repository</label>
+    <div class="control">
+      <div class="select">
+        <select x-model="selectedRepo">
+          <template x-for="repoName in $store.api.repoNames" :key="repoName">
+            <option x-text="repoName" :value="repoName"></option>
+          </template>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div x-show="loading" class="has-text-centered py-4">
+    <span class="icon is-large">
+      <i class="fas fa-spinner fa-pulse fa-2x"></i>
+    </span>
+  </div>
+
+  <div x-show="!loading">
+    <div x-show="posts.length === 0 && selectedRepo" class="notification is-info is-light">
+      <p>No posts found in this repository.</p>
+    </div>
+
+    <div class="panel is-primary" x-show="posts.length > 0">
+      <p class="panel-heading">
+        <span x-text="total"></span> posts in <span x-text="selectedRepo"></span>
+      </p>
+      <template x-for="post in posts" :key="post.id">
+        <a class="panel-block is-flex is-flex-direction-column is-align-items-start" @click="editPost(post)">
+          <div class="is-flex is-justify-content-space-between is-align-items-center" style="width: 100%;">
+            <strong x-text="post.title" class="has-text-dark"></strong>
+            <span class="icon has-text-grey">
+              <i class="fas fa-edit"></i>
+            </span>
+          </div>
+          <div class="is-size-7 has-text-grey">
+            <span x-text="formatDate(post.date)"></span>
+            <template x-if="post.authors && post.authors.length > 0">
+              <span> &bull; <span x-text="post.authors.join(', ')"></span></span>
+            </template>
+          </div>
+        </a>
+      </template>
+    </div>
+
+    <nav class="pagination is-centered" role="navigation" aria-label="pagination" x-show="totalPages > 1">
+      <a class="pagination-previous" :disabled="currentPage <= 1" @click="prevPage">Previous</a>
+      <a class="pagination-next" :disabled="currentPage >= totalPages" @click="nextPage">Next page</a>
+      <ul class="pagination-list">
+        <li>
+          <span class="pagination-link is-current" x-text="'Page ' + currentPage + ' of ' + totalPages"></span>
+        </li>
+      </ul>
+    </nav>
+  </div>
 </div>

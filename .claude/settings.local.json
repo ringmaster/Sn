@@ -10,7 +10,9 @@
       "Bash(go vet:*)",
       "Bash(go tool cover:*)",
       "WebFetch(domain:asymptomatic.net)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(ls:*)",
+      "Bash(curl:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

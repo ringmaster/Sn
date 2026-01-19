@@ -241,6 +241,7 @@ func setupRoutes(router *mux.Router) {
 			reporest.Path("/{repo:.+}/{slug:.+}").Methods("PUT").HandlerFunc(repoRestPutHandler).Name(routeName + "_reporest_put")
 			reporest.Path("/{repo:.+}/{slug:.+}").Methods("DELETE").HandlerFunc(repoRestDeleteHandler).Name(routeName + "_reporest_delete")
 			apiroutes.Path("/upload").Methods("POST").HandlerFunc(uploadHandler).Name(routeName + "_apiupload")
+			apiroutes.Path("/posts").Methods("GET").HandlerFunc(postsListHandler).Name(routeName + "_posts_list")
 			apiroutes.Methods("POST").HandlerFunc(loginHandler).Name("000" + routeName + "_apilogin")
 			apiroutes.Methods("DELETE").HandlerFunc(logoutHandler).Name("000" + routeName + "_apidelete")
 			if viper.IsSet(fmt.Sprintf("%s.dir", routeConfigLocation)) {

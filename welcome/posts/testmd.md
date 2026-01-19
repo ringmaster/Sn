@@ -1,15 +1,14 @@
 ---
 title: Markdown Test
 slug: markdown-test
-date: 2022-11-11
-categories: [welcome]
-authors: 
-    - owen
+date: 2026-01-19 12:51:10
+tags:
+  - welcome
+hero: 
+authors:
+  - test
 ---
 
-Why is nothing showing up?
-
-Does this appear.  Where's my heading?
 
 ## Checklist
 

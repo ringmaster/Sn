@@ -96,7 +96,7 @@ routes:
         paginate_name: page
         paginate_count: 5
   05_posts:
-    path: /posts/{slug:[^/]+}
+    path: /posts/{slug:.+}
     handler: posts
     templates:
       - post.html.hb

@@ -18,6 +18,7 @@ import (
 	"github.com/ringmaster/Sn/sn/activitypub"
 	"github.com/spf13/afero"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -293,4 +294,65 @@ func DirExistsFs(fs afero.Fs, path string) bool {
 		return false
 	}
 	return info.IsDir()
+}
+
+// GetRepoOrder returns the repo names in the order they appear in the config file.
+// This preserves the YAML key order which viper.GetStringMap() loses.
+func GetRepoOrder() []string {
+	configFile := viper.ConfigFileUsed()
+	if configFile == "" || Vfs == nil {
+		// Fallback to unordered keys
+		repos := viper.GetStringMap("repos")
+		result := make([]string, 0, len(repos))
+		for k := range repos {
+			result = append(result, k)
+		}
+		return result
+	}
+
+	// Read from the virtual filesystem that viper uses
+	data, err := afero.ReadFile(Vfs, configFile)
+	if err != nil {
+		slog.Warn("Could not read config file for repo order", "error", err, "file", configFile)
+		// Fallback to unordered keys
+		repos := viper.GetStringMap("repos")
+		result := make([]string, 0, len(repos))
+		for k := range repos {
+			result = append(result, k)
+		}
+		return result
+	}
+
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		slog.Warn("Could not parse config file for repo order", "error", err)
+		return nil
+	}
+
+	// Navigate to find "repos" key
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return nil
+	}
+
+	mapping := root.Content[0]
+	if mapping.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	// Find the "repos" key in the mapping
+	for i := 0; i < len(mapping.Content)-1; i += 2 {
+		keyNode := mapping.Content[i]
+		valueNode := mapping.Content[i+1]
+
+		if keyNode.Value == "repos" && valueNode.Kind == yaml.MappingNode {
+			// Extract keys in order
+			result := make([]string, 0, len(valueNode.Content)/2)
+			for j := 0; j < len(valueNode.Content)-1; j += 2 {
+				result = append(result, valueNode.Content[j].Value)
+			}
+			return result
+		}
+	}
+
+	return nil
 }

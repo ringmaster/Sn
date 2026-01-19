@@ -1,6 +1,7 @@
 package sn
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -109,5 +110,81 @@ func TestCtxKeyStruct(t *testing.T) {
 
 	if keys[key] != "value" {
 		t.Error("ctxKey should be usable as context key")
+	}
+}
+
+// TestSlugPatternMatchesSubdirectories verifies that route patterns
+// can match slugs containing slashes (subdirectory posts)
+func TestSlugPatternMatchesSubdirectories(t *testing.T) {
+	tests := []struct {
+		name       string
+		pattern    string
+		path       string
+		shouldMatch bool
+		expectedSlug string
+	}{
+		{
+			name:        "simple slug matches",
+			pattern:     "/posts/{slug:.+}",
+			path:        "/posts/my-post",
+			shouldMatch: true,
+			expectedSlug: "my-post",
+		},
+		{
+			name:        "subdirectory slug matches",
+			pattern:     "/posts/{slug:.+}",
+			path:        "/posts/tests/path-test",
+			shouldMatch: true,
+			expectedSlug: "tests/path-test",
+		},
+		{
+			name:        "deep subdirectory slug matches",
+			pattern:     "/posts/{slug:.+}",
+			path:        "/posts/2024/01/15/my-post",
+			shouldMatch: true,
+			expectedSlug: "2024/01/15/my-post",
+		},
+		{
+			name:        "restrictive pattern rejects subdirectory",
+			pattern:     "/posts/{slug:[^/]+}",
+			path:        "/posts/tests/path-test",
+			shouldMatch: false,
+			expectedSlug: "",
+		},
+		{
+			name:        "restrictive pattern accepts simple slug",
+			pattern:     "/posts/{slug:[^/]+}",
+			path:        "/posts/simple-post",
+			shouldMatch: true,
+			expectedSlug: "simple-post",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := mux.NewRouter()
+			r.HandleFunc(tt.pattern, func(w http.ResponseWriter, r *http.Request) {
+				vars := mux.Vars(r)
+				w.Write([]byte(vars["slug"]))
+			})
+
+			req := httptest.NewRequest("GET", tt.path, nil)
+			rr := httptest.NewRecorder()
+
+			r.ServeHTTP(rr, req)
+
+			if tt.shouldMatch {
+				if rr.Code != http.StatusOK {
+					t.Errorf("Expected route to match, got status %d", rr.Code)
+				}
+				if rr.Body.String() != tt.expectedSlug {
+					t.Errorf("Expected slug %q, got %q", tt.expectedSlug, rr.Body.String())
+				}
+			} else {
+				if rr.Code == http.StatusOK {
+					t.Errorf("Expected route to NOT match, but it did with slug %q", rr.Body.String())
+				}
+			}
+		})
 	}
 }

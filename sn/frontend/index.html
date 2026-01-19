@@ -85,6 +85,16 @@
         window.PineconeRouter.settings.basePath = "{{BASE_PATH}}";
         window.PineconeRouter.settings.interceptLinks = true;
 
+        // Store for passing edit data between pages
+        Alpine.store("editPost", {
+          repo: null,
+          slug: null,
+          clear() {
+            this.repo = null;
+            this.slug = null;
+          }
+        });
+
         // When the page loads, load the blog data from the api endpoint
         Alpine.store("api", {
           data: {
@@ -93,6 +103,14 @@
             username: "",
             title: "",
             repos: [],
+            repoOrder: [],
+          },
+          get repoNames() {
+            // Use repoOrder from config if available, otherwise fall back to Object.keys
+            if (this.data.repoOrder && this.data.repoOrder.length > 0) {
+              return this.data.repoOrder;
+            }
+            return Object.keys(this.data.repos || {});
           },
           init() {
             this.refresh();

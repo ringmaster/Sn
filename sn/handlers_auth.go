@@ -113,6 +113,7 @@ func dataHandler(w http.ResponseWriter, r *http.Request) {
 		"loggedIn":            true,
 		"username":            username,
 		"repos":               repos,
+		"repoOrder":           GetRepoOrder(),
 		"slugPattern":         viper.GetString("slug_pattern"),
 		"gitCredentialsValid": gitCredentialsValid,
 		"gitStatus":           gitStatus,

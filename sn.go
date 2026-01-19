@@ -46,6 +46,13 @@ func serve() {
 			return
 		}
 
+		// Load ActivityPub comments from git storage into SQLite
+		err = sn.LoadActivityPubComments()
+		if err != nil {
+			slog.Error(fmt.Sprintf("Error while loading ActivityPub comments: %v", err))
+			// Continue - this is not fatal
+		}
+
 		// Set up ActivityPub cleanup
 		defer func() {
 			if sn.ActivityPubManager != nil {

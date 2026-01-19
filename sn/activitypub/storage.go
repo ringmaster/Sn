@@ -572,6 +572,61 @@ func (s *Storage) LoadComments(repo, slug string) ([]*Comment, error) {
 	return comments, nil
 }
 
+// LoadAllComments walks the comments directory tree and returns all comments
+func (s *Storage) LoadAllComments() ([]*Comment, error) {
+	var comments []*Comment
+
+	commentsBaseDir := ".activitypub/comments"
+	exists, err := afero.DirExists(s.activityPubFs, commentsBaseDir)
+	if err != nil {
+		return comments, fmt.Errorf("failed to check comments base directory: %w", err)
+	}
+
+	if !exists {
+		return comments, nil
+	}
+
+	// Walk the directory tree: .activitypub/comments/{repo}/{slug}/*.json
+	err = afero.Walk(s.activityPubFs, commentsBaseDir, func(filePath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		// Only process JSON files
+		if filepath.Ext(filePath) != ".json" {
+			return nil
+		}
+
+		data, err := afero.ReadFile(s.activityPubFs, filePath)
+		if err != nil {
+			slog.Warn("Failed to read comment file", "file", filePath, "error", err)
+			return nil // Continue walking
+		}
+
+		var comment Comment
+		err = json.Unmarshal(data, &comment)
+		if err != nil {
+			slog.Warn("Failed to unmarshal comment", "file", filePath, "error", err)
+			return nil // Continue walking
+		}
+
+		comments = append(comments, &comment)
+		return nil
+	})
+
+	if err != nil {
+		return comments, fmt.Errorf("failed to walk comments directory: %w", err)
+	}
+
+	slog.Info("Loaded comments from git storage", "count", len(comments))
+	return comments, nil
+}
+
 // markPendingChanges marks that we have uncommitted changes
 // If commit interval is 0, commits immediately
 func (s *Storage) markPendingChanges() {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/aymerick/raymond"
+	"github.com/ringmaster/Sn/sn/util"
 	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 )
@@ -213,5 +214,11 @@ func RegisterTemplateHelpers() {
 			return raymond.SafeString(options.Fn())
 		}
 		return ""
+	})
+	// permalink generates a full URL for a post/item based on route configuration
+	// Usage: {{permalink this}} or {{permalink .}} when inside a post context
+	// Supports date-based URL patterns like /posts/{year}/{month}/{slug}
+	raymond.RegisterHelper("permalink", func(item interface{}, options *raymond.Options) string {
+		return util.GetItemURL(item)
 	})
 }

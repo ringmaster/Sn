@@ -6,7 +6,7 @@ import (
 	"github.com/ringmaster/Sn/sn/activitypub"
 )
 
-// Item is...
+// Item represents a content item (post, page, etc.)
 type Item struct {
 	Title       string
 	Slug        string
@@ -20,6 +20,7 @@ type Item struct {
 	Html        string
 	Source      string
 	Id          int64
+	Comments    []*activitypub.Comment
 }
 
 type ItemResult struct {

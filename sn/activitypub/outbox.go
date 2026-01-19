@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/ringmaster/Sn/sn/util"
 	"github.com/spf13/viper"
 )
@@ -539,7 +540,11 @@ func (os *OutboxService) getActivitiesForPage(username string, pageNum int) []in
 		}
 
 		// Create ActivityPub Article object
-		postURL := fmt.Sprintf("%s/posts/%s", baseURL, slug)
+		postURL := util.GetItemURL(struct {
+			Slug string
+			Repo string
+			Date time.Time
+		}{slug, repo, publishedTime})
 		actorURL := fmt.Sprintf("%s/@%s", baseURL, username)
 
 		// Build attribution for multiple authors
@@ -862,4 +867,152 @@ func buildFollowersCC(post *BlogPost, baseURL string) []string {
 	}
 
 	return cc
+}
+
+// HandlePostObject handles requests for a post's ActivityPub object representation
+func (os *OutboxService) HandlePostObject(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	slug := vars["slug"]
+
+	if slug == "" {
+		http.Error(w, "Missing slug", http.StatusBadRequest)
+		return
+	}
+
+	baseURL := GetBaseURL(r)
+
+	// Query the post from database
+	row := os.db.QueryRow(`
+		SELECT i.id, i.title, i.html, i.repo, i.publishedon
+		FROM items i
+		WHERE i.slug = ?
+		LIMIT 1`, slug)
+
+	var id int64
+	var title, html, repo, publishedon string
+	err := row.Scan(&id, &title, &html, &repo, &publishedon)
+	if err != nil {
+		slog.Warn("Post not found for ActivityPub", "slug", slug, "error", err)
+		http.Error(w, "Post not found", http.StatusNotFound)
+		return
+	}
+
+	// Check if ActivityPub is enabled for this repo
+	if !isActivityPubEnabledForRepo(repo) {
+		http.Error(w, "ActivityPub not enabled for this content", http.StatusNotFound)
+		return
+	}
+
+	// Parse published date for URL building and later use
+	publishedTime, err := time.Parse("2006-01-02 15:04:05", publishedon)
+	if err != nil {
+		publishedTime = time.Now()
+	}
+
+	// Build post URL using route config
+	postURL := util.GetItemURL(struct {
+		Slug string
+		Repo string
+		Date time.Time
+	}{slug, repo, publishedTime})
+
+	// Get authors for this post
+	var authors []string
+	authorRows, err := os.db.Query(`
+		SELECT a.author FROM authors a
+		INNER JOIN items_authors ia ON ia.author_id = a.id
+		WHERE ia.item_id = ?`, id)
+	if err == nil {
+		for authorRows.Next() {
+			var author string
+			if err := authorRows.Scan(&author); err == nil {
+				authors = append(authors, author)
+			}
+		}
+		authorRows.Close()
+	}
+
+	// Get tags for this post
+	var tags []string
+	tagRows, err := os.db.Query(`
+		SELECT c.category FROM categories c
+		INNER JOIN items_categories ic ON ic.category_id = c.id
+		WHERE ic.item_id = ?`, id)
+	if err == nil {
+		for tagRows.Next() {
+			var tag string
+			if err := tagRows.Scan(&tag); err == nil {
+				tags = append(tags, tag)
+			}
+		}
+		tagRows.Close()
+	}
+
+	// Build attribution
+	var attribution interface{}
+	if len(authors) == 1 {
+		attribution = fmt.Sprintf("%s/@%s", baseURL, authors[0])
+	} else if len(authors) > 1 {
+		var authorURLs []string
+		for _, author := range authors {
+			authorURLs = append(authorURLs, fmt.Sprintf("%s/@%s", baseURL, author))
+		}
+		attribution = authorURLs
+	} else {
+		// Fallback to repo owner
+		owner := getRepoOwner(repo)
+		if owner != "" {
+			attribution = fmt.Sprintf("%s/@%s", baseURL, owner)
+		} else {
+			attribution = baseURL
+		}
+	}
+
+	// Get summary from frontmatter
+	summary := ""
+	frontmatterRows, err := os.db.Query("SELECT fieldname, value FROM frontmatter WHERE item_id = ?", id)
+	if err == nil {
+		for frontmatterRows.Next() {
+			var fieldname, value string
+			if err := frontmatterRows.Scan(&fieldname, &value); err == nil {
+				if fieldname == "summary" || fieldname == "description" {
+					summary = value
+					break
+				}
+			}
+		}
+		frontmatterRows.Close()
+	}
+
+	// If no summary, auto-generate
+	if summary == "" {
+		summary = util.GenerateSummaryFromHTML(html)
+	}
+
+	// Build the Article object
+	article := map[string]interface{}{
+		"@context":     ActivityPubContext,
+		"id":           postURL,
+		"type":         "Article",
+		"name":         title,
+		"content":      html,
+		"attributedTo": attribution,
+		"published":    publishedTime.Format(time.RFC3339),
+		"url":          postURL,
+	}
+
+	if summary != "" {
+		article["summary"] = summary
+	}
+
+	if len(tags) > 0 {
+		article["tag"] = convertTagsToActivityPub(tags)
+	}
+
+	// Set response headers
+	w.Header().Set("Content-Type", ContentTypeActivityJSON)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(article)
+
+	slog.Info("Served ActivityPub post object", "slug", slug, "title", title)
 }

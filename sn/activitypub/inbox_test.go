@@ -200,7 +200,7 @@ func TestNewInboxService(t *testing.T) {
 	km := &KeyManager{}
 	actor := &ActorService{}
 
-	service := NewInboxService(storage, km, actor)
+	service := NewInboxService(storage, km, actor, nil)
 
 	if service == nil {
 		t.Fatal("NewInboxService should not return nil")
@@ -241,7 +241,7 @@ func TestHandleInbox_ActivityPubDisabled(t *testing.T) {
 	viper.Set("users.alice.passwordhash", "hash")
 	viper.Set("activitypub.enabled", false)
 
-	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{})
+	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{}, nil)
 
 	req := httptest.NewRequest("POST", "/@alice/inbox", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/activity+json")
@@ -260,7 +260,7 @@ func TestHandleInbox_InvalidJSON(t *testing.T) {
 	viper.Set("users.alice.passwordhash", "hash")
 	viper.Set("activitypub.enabled", true)
 
-	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{})
+	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{}, nil)
 
 	req := httptest.NewRequest("POST", "/@alice/inbox", strings.NewReader(`not json`))
 	req.Header.Set("Content-Type", "application/activity+json")
@@ -278,7 +278,7 @@ func TestHandleInbox_InvalidInboxPath(t *testing.T) {
 	viper.Reset()
 	viper.Set("activitypub.enabled", true)
 
-	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{})
+	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{}, nil)
 
 	// Path without @ prefix should fail
 	req := httptest.NewRequest("POST", "/alice/inbox", strings.NewReader(`{"type": "Follow"}`))
@@ -298,7 +298,7 @@ func TestHandleInbox_UserNotFound(t *testing.T) {
 	viper.Set("activitypub.enabled", true)
 	// Note: no users configured
 
-	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{})
+	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{}, nil)
 
 	req := httptest.NewRequest("POST", "/@nonexistent/inbox", strings.NewReader(`{"type": "Follow", "actor": "https://example.com/@bob"}`))
 	req.Header.Set("Content-Type", "application/activity+json")
@@ -317,7 +317,7 @@ func TestHandleFollow_MissingActor(t *testing.T) {
 	viper.Set("users.alice.passwordhash", "hash")
 	viper.Set("activitypub.enabled", true)
 
-	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{})
+	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{}, nil)
 
 	// Follow activity missing actor field
 	body := `{"type": "Follow", "object": "https://example.com/@alice"}`
@@ -339,7 +339,7 @@ func TestHandleFollow_MissingObject(t *testing.T) {
 	viper.Set("users.alice.passwordhash", "hash")
 	viper.Set("activitypub.enabled", true)
 
-	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{})
+	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{}, nil)
 
 	// Follow activity missing object field
 	body := `{"type": "Follow", "actor": "https://remote.example/@bob"}`
@@ -362,7 +362,7 @@ func TestHandleFollow_ObjectMismatch(t *testing.T) {
 	viper.Set("activitypub.enabled", true)
 	viper.Set("rooturl", "https://example.com")
 
-	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{})
+	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{}, nil)
 
 	// Follow activity with wrong object (trying to follow someone else through alice's inbox)
 	body := `{"type": "Follow", "actor": "https://remote.example/@bob", "object": "https://example.com/@charlie"}`
@@ -426,7 +426,7 @@ func TestHandleFollow_ValidActivity(t *testing.T) {
 	mockFs.MkdirAll(".activitypub/users/alice", 0755)
 
 	// Create service with mock storage
-	service := NewInboxService(storage, &KeyManager{}, &ActorService{})
+	service := NewInboxService(storage, &KeyManager{}, &ActorService{}, nil)
 
 	// Create a valid Follow activity - note we use the mock server URL
 	followActivity := Activity{
@@ -487,7 +487,7 @@ func TestHandleUndo_Follow(t *testing.T) {
 		"https://remote.example/@bob": existingFollower,
 	})
 
-	service := NewInboxService(storage, &KeyManager{}, &ActorService{})
+	service := NewInboxService(storage, &KeyManager{}, &ActorService{}, nil)
 
 	// Create Undo Follow activity
 	undoActivity := Activity{
@@ -552,7 +552,7 @@ func TestHandleCreate_Note(t *testing.T) {
 	}
 	mockFs.MkdirAll(".activitypub/comments", 0755)
 
-	service := NewInboxService(storage, &KeyManager{}, &ActorService{})
+	service := NewInboxService(storage, &KeyManager{}, &ActorService{}, nil)
 
 	// Create Note activity (a reply to a post)
 	createActivity := Activity{
@@ -607,7 +607,7 @@ func TestSharedInbox_Follow(t *testing.T) {
 	}
 	mockFs.MkdirAll(".activitypub/users/alice", 0755)
 
-	service := NewInboxService(storage, &KeyManager{}, &ActorService{})
+	service := NewInboxService(storage, &KeyManager{}, &ActorService{}, nil)
 
 	// Follow activity sent to shared inbox
 	followActivity := Activity{
@@ -637,7 +637,7 @@ func TestUnsupportedActivityType(t *testing.T) {
 	viper.Set("users.alice.passwordhash", "hash")
 	viper.Set("activitypub.enabled", true)
 
-	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{})
+	service := NewInboxService(&Storage{}, &KeyManager{}, &ActorService{}, nil)
 
 	// Some made-up activity type
 	body := `{"type": "SomethingWeird", "actor": "https://remote.example/@bob"}`
@@ -661,7 +661,7 @@ func TestProcessActivity(t *testing.T) {
 		commitInterval: 0,
 	}
 
-	service := NewInboxService(storage, &KeyManager{}, &ActorService{})
+	service := NewInboxService(storage, &KeyManager{}, &ActorService{}, nil)
 
 	req := httptest.NewRequest("POST", "/@alice/inbox", nil)
 

@@ -24,6 +24,10 @@
         {{#if authors}}
         <meta name="author" content="{{#each authors}}{{.}}{{#unless @last}},{{/unless}}{{/each}}">
         {{/if}}
+
+        {{#if @root.activitypub_enabled}}
+        <link rel="alternate" type="application/activity+json" href="{{permalink this}}" />
+        {{/if}}
     {{/withfirst}}
 {{/define}}
 
@@ -51,6 +55,35 @@
         </div>
     </main>
 </article>
+
+<section class="comments">
+    <h3>Comments</h3>
+    {{#if @root.activitypub_enabled}}
+        <p class="activitypub-info">
+            To comment on this post, search for this URL in your ActivityPub client (such as Mastodon):
+            <code>{{permalink this}}</code>
+        </p>
+        {{#if Comments}}
+            <div class="comments-list">
+            {{#each Comments}}
+                <div class="comment">
+                    <div class="comment-header">
+                        <a href="{{AuthorURL}}" class="comment-author" rel="nofollow noopener" target="_blank">{{AuthorName}}</a>
+                        <span class="comment-date">{{dateformat Published "January 02, 2006 03:04 PM"}}</span>
+                    </div>
+                    <div class="comment-content">
+                        {{{ContentHTML}}}
+                    </div>
+                </div>
+            {{/each}}
+            </div>
+        {{else}}
+            <p class="no-comments">No comments yet. Be the first to reply via ActivityPub!</p>
+        {{/if}}
+    {{else}}
+        <p class="activitypub-disabled">Comments are only available via ActivityPub, which is currently disabled.</p>
+    {{/if}}
+</section>
 {{/with}}
 {{/each}}
 

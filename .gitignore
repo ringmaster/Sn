@@ -32,3 +32,7 @@ sn/Sn
 *.log
 .activitypub
 asy/*
+
+# Claude AI assistant
+CLAUDE.md
+.claude/

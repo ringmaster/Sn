@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/ringmaster/Sn/sn/util"
 	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 )
@@ -76,7 +77,7 @@ func NewManager(mainFs afero.Fs, db *sql.DB) (*Manager, error) {
 
 	// Initialize services
 	actorService := NewActorService(storage, keyManager)
-	inboxService := NewInboxService(storage, keyManager, actorService)
+	inboxService := NewInboxService(storage, keyManager, actorService, db)
 	outboxService := NewOutboxService(storage, keyManager, actorService, inboxService, db)
 
 	manager := &Manager{
@@ -156,6 +157,21 @@ func (m *Manager) RegisterRoutes(router *mux.Router) {
 		Methods("GET").
 		Name("activitypub-following")
 
+	// Post object endpoints (for ActivityPub content negotiation)
+	// Register handlers for all routes that serve posts with slugs
+	postPatterns := util.GetAllPostRoutePatterns()
+	for i, pattern := range postPatterns {
+		router.HandleFunc(pattern, m.outboxService.HandlePostObject).
+			Methods("GET").
+			Headers("Accept", "application/activity+json").
+			Name(fmt.Sprintf("activitypub-post-%d", i))
+
+		router.HandleFunc(pattern, m.outboxService.HandlePostObject).
+			Methods("GET").
+			Headers("Accept", "application/ld+json").
+			Name(fmt.Sprintf("activitypub-post-ld-%d", i))
+	}
+
 	slog.Info("ActivityPub routes registered successfully")
 }
 
@@ -233,6 +249,15 @@ func (m *Manager) GetComments(repo, slug string) ([]*Comment, error) {
 	}
 
 	return m.storage.LoadComments(repo, slug)
+}
+
+// GetAllComments returns all comments from git storage
+func (m *Manager) GetAllComments() ([]*Comment, error) {
+	if !m.enabled {
+		return nil, nil
+	}
+
+	return m.storage.LoadAllComments()
 }
 
 // ForceRegenerateKeys forces regeneration of ActivityPub keys (recovery from corruption)

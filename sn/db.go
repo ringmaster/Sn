@@ -114,6 +114,31 @@ func schema() string {
 	  CREATE INDEX IF NOT EXISTS items_categories_item_id ON "items_categories" ("item_id" ASC);
 
 	  CREATE INDEX IF NOT EXISTS items_categories_category_id ON "items_categories" ("category_id" ASC);
+
+	  CREATE TABLE IF NOT EXISTS "comments" (
+		"id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+		"comment_id" varchar(255) NOT NULL,
+		"activity_id" varchar(255),
+		"in_reply_to" varchar(255) NOT NULL,
+		"author" varchar(255) NOT NULL,
+		"author_name" varchar(255),
+		"author_url" varchar(255),
+		"content" text NOT NULL,
+		"content_html" text,
+		"published" timestamp,
+		"updated" timestamp,
+		"verified" boolean DEFAULT 0,
+		"approved" boolean DEFAULT 1,
+		"hidden" boolean DEFAULT 0,
+		"post_slug" varchar(255) NOT NULL,
+		"post_repo" varchar(255) NOT NULL,
+		"item_id" integer,
+		FOREIGN KEY (item_id) REFERENCES "items" (id)
+	  );
+
+	  CREATE UNIQUE INDEX IF NOT EXISTS comments_comment_id ON "comments" ("comment_id");
+	  CREATE INDEX IF NOT EXISTS comments_post ON "comments" ("post_repo", "post_slug");
+	  CREATE INDEX IF NOT EXISTS comments_published ON "comments" ("published" DESC);
 	`
 }
 
@@ -317,13 +342,8 @@ func ConvertItemToBlogPost(item Item) *activitypub.BlogPost {
 		return nil
 	}
 
-	// Build post URL
-	baseURL := viper.GetString("rooturl")
-	if activityPubURL := viper.GetString("activitypub.rooturl"); activityPubURL != "" {
-		baseURL = activityPubURL
-	}
-	baseURL = strings.TrimSuffix(baseURL, "/")
-	postURL := fmt.Sprintf("%s/posts/%s", baseURL, item.Slug)
+	// Build post URL using route config
+	postURL := util.GetItemURL(item)
 
 	// Extract summary from frontmatter or auto-generate from content
 	summary := ""
@@ -863,6 +883,16 @@ func ItemsFromItemQuery(qry ItemQuery) ItemResult {
 		}
 	}
 
+	// Load comments only for single-item queries (when viewing a specific post)
+	if qry.Slug != nil && len(items) == 1 && ActivityPubManager != nil {
+		comments, err := LoadCommentsForPost(items[0].Repo, items[0].Slug)
+		if err != nil {
+			slog.Warn("Failed to load comments for post", "repo", items[0].Repo, "slug", items[0].Slug, "error", err)
+		} else {
+			items[0].Comments = comments
+		}
+	}
+
 	return ItemResult{Items: items, Total: int(itemCount), Pages: int(math.Ceil(float64(itemCount) / float64(qry.PerPage))), Page: pg}
 }
 
@@ -886,4 +916,84 @@ func andSQL(paramName string, qryParam *string, sql string, queryvals []any) (st
 		sql = fmt.Sprintf("%s AND %s = ?", sql, paramName)
 	}
 	return sql, queryvals
+}
+
+// InsertComment inserts or replaces a comment in the database
+func InsertComment(comment *activitypub.Comment) error {
+	_, err := db.Exec(`INSERT OR REPLACE INTO comments
+		(comment_id, activity_id, in_reply_to, author, author_name, author_url,
+		 content, content_html, published, updated, verified, approved, hidden,
+		 post_slug, post_repo)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		comment.ID,
+		comment.ActivityID,
+		comment.InReplyTo,
+		comment.Author,
+		comment.AuthorName,
+		comment.AuthorURL,
+		comment.Content,
+		comment.ContentHTML,
+		comment.Published,
+		comment.Updated,
+		comment.Verified,
+		comment.Approved,
+		comment.Hidden,
+		comment.PostSlug,
+		comment.PostRepo,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to insert comment: %w", err)
+	}
+	return nil
+}
+
+// LoadCommentsForPost loads approved, non-hidden comments for a specific post
+func LoadCommentsForPost(repo, slug string) ([]*activitypub.Comment, error) {
+	var comments []*activitypub.Comment
+
+	rows, err := db.Query(`SELECT comment_id, activity_id, in_reply_to, author, author_name,
+		author_url, content, content_html, published, updated, verified, approved, hidden,
+		post_slug, post_repo
+		FROM comments
+		WHERE post_repo = ? AND post_slug = ? AND approved = 1 AND hidden = 0
+		ORDER BY published ASC`, repo, slug)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query comments: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var comment activitypub.Comment
+		var published, updated sql.NullTime
+		err := rows.Scan(
+			&comment.ID,
+			&comment.ActivityID,
+			&comment.InReplyTo,
+			&comment.Author,
+			&comment.AuthorName,
+			&comment.AuthorURL,
+			&comment.Content,
+			&comment.ContentHTML,
+			&published,
+			&updated,
+			&comment.Verified,
+			&comment.Approved,
+			&comment.Hidden,
+			&comment.PostSlug,
+			&comment.PostRepo,
+		)
+		if err != nil {
+			slog.Warn("Failed to scan comment row", "error", err)
+			continue
+		}
+		if published.Valid {
+			comment.Published = published.Time
+		}
+		if updated.Valid {
+			comment.Updated = updated.Time
+		}
+		comments = append(comments, &comment)
+	}
+
+	return comments, nil
 }

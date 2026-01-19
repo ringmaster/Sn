@@ -1,6 +1,7 @@
 package activitypub
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,14 +17,16 @@ type InboxService struct {
 	storage      *Storage
 	keyManager   *KeyManager
 	actorService *ActorService
+	db           *sql.DB
 }
 
 // NewInboxService creates a new inbox service
-func NewInboxService(storage *Storage, keyManager *KeyManager, actorService *ActorService) *InboxService {
+func NewInboxService(storage *Storage, keyManager *KeyManager, actorService *ActorService, db *sql.DB) *InboxService {
 	return &InboxService{
 		storage:      storage,
 		keyManager:   keyManager,
 		actorService: actorService,
+		db:           db,
 	}
 }
 
@@ -434,10 +437,39 @@ func (is *InboxService) handleCreateNote(activity *Activity, objectMap map[strin
 		Metadata:    make(map[string]string),
 	}
 
-	// Save comment
+	// Save comment to git storage (source of truth)
 	err = is.storage.SaveComment(comment)
 	if err != nil {
 		return fmt.Errorf("failed to save comment: %w", err)
+	}
+
+	// Also insert into SQLite for fast retrieval
+	if is.db != nil {
+		_, dbErr := is.db.Exec(`INSERT OR REPLACE INTO comments
+			(comment_id, activity_id, in_reply_to, author, author_name, author_url,
+			 content, content_html, published, updated, verified, approved, hidden,
+			 post_slug, post_repo)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			comment.ID,
+			comment.ActivityID,
+			comment.InReplyTo,
+			comment.Author,
+			comment.AuthorName,
+			comment.AuthorURL,
+			comment.Content,
+			comment.ContentHTML,
+			comment.Published,
+			comment.Updated,
+			comment.Verified,
+			comment.Approved,
+			comment.Hidden,
+			comment.PostSlug,
+			comment.PostRepo,
+		)
+		if dbErr != nil {
+			slog.Warn("Failed to insert comment into SQLite", "error", dbErr, "comment_id", comment.ID)
+			// Don't fail - git storage is the source of truth
+		}
 	}
 
 	slog.Info("Comment created", "id", comment.ID, "author", authorName, "post", postSlug)

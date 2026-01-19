@@ -125,6 +125,36 @@ func ForceRegenerateActivityPubKeys() error {
 	return ActivityPubManager.ForceRegenerateKeys()
 }
 
+// LoadActivityPubComments loads all comments from git storage into SQLite
+// This should be called at startup after both ActivityPub and database are initialized
+func LoadActivityPubComments() error {
+	if ActivityPubManager == nil || !ActivityPubManager.IsEnabled() {
+		return nil
+	}
+
+	comments, err := ActivityPubManager.GetAllComments()
+	if err != nil {
+		return fmt.Errorf("failed to load comments from git storage: %w", err)
+	}
+
+	if len(comments) == 0 {
+		slog.Info("No ActivityPub comments to load into SQLite")
+		return nil
+	}
+
+	loaded := 0
+	for _, comment := range comments {
+		if err := InsertComment(comment); err != nil {
+			slog.Warn("Failed to insert comment into SQLite", "comment_id", comment.ID, "error", err)
+			continue
+		}
+		loaded++
+	}
+
+	slog.Info("Loaded ActivityPub comments into SQLite", "total", len(comments), "loaded", loaded)
+	return nil
+}
+
 func CloneRepoToVFS(snGitRepo string) (afero.Fs, error) {
 	slog.Info("Cloning repository to virtual filesystem")
 

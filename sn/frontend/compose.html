@@ -1,16 +1,16 @@
 <div
   x-data="{
-    title: '', 
-    slug: '', 
-    repo: '', 
-    tags: '', 
-    content: '', 
-    isOpen: false, 
-    customSlug: false, 
-    images: [], 
-    date: '', 
-    showDatePicker: false, 
-    showModal: false, 
+    title: '',
+    slug: '',
+    repo: '',
+    tags: '',
+    content: '',
+    isOpen: false,
+    customSlug: false,
+    images: [],
+    date: '',
+    showDatePicker: false,
+    showModal: false,
     showSlugPattern: false,
     slugPattern: 'YYYY-MM-DD-title',
     hero: '',
@@ -154,6 +154,11 @@ submitPost() {
 async init() {
   $watch('title', () => this.updateSlug());
   this.slugPattern = Alpine.store('api').data.slugPattern || this.slugPattern;
+
+  // Listen for clear requests (when Compose is clicked while already on compose page)
+  window.addEventListener('compose-clear', () => {
+    this.clearForm();
+  });
 
   // Check Alpine store first (SPA navigation), then sessionStorage (page reload)
   const editStore = Alpine.store('editPost');

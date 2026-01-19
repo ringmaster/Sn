@@ -237,6 +237,7 @@
             x-show="$store.api.data.loggedIn"
             class="navbar-item"
             href="/compose"
+            @click="$store.editPost.clear(); sessionStorage.removeItem('editPost'); window.dispatchEvent(new CustomEvent('compose-clear'));"
           >
             Compose
           </a>

@@ -22,9 +22,9 @@ var CLI struct {
 		Query string `arg:"" required:"" help:"The query to execute"`
 	} `cmd:"sql" help:"Perform queries against repo data"`
 	Passwd struct {
-		Username string `arg:"" required:"" help:"The user"`
-		Password string `arg:"" optional:"" help:"The password to set"`
-	} `cmd:"passwd" help:"Create or update a user password"`
+		User     string `optional:"" help:"If specified, store the password hash in config for this user"`
+		Password string `arg:"" optional:"" help:"The password to hash (prompts if not provided)"`
+	} `cmd:"passwd" help:"Generate a bcrypt password hash. With --user, stores in config."`
 	RegenKeys struct {
 	} `cmd:"regen-keys" help:"Regenerate ActivityPub keys (removes existing encrypted keys)"`
 }
@@ -101,8 +101,12 @@ func sql(query string) {
 
 func passwd(username string, passwords ...string) {
 	var password string
-	if len(passwords) == 0 {
-		fmt.Printf("Please enter password for user %s: ", username)
+	if len(passwords) == 0 || passwords[0] == "" {
+		if username != "" {
+			fmt.Printf("Please enter password for user %s: ", username)
+		} else {
+			fmt.Print("Please enter password: ")
+		}
 		bytePassword, err := terminal.ReadPassword(int(syscall.Stdin))
 		if err != nil {
 			slog.Error(fmt.Sprintf("Error reading password: %v", err))
@@ -110,6 +114,8 @@ func passwd(username string, passwords ...string) {
 		}
 		password = string(bytePassword)
 		fmt.Println()
+	} else {
+		password = passwords[0]
 	}
 	if password == "" {
 		slog.Error("No password provided")
@@ -122,6 +128,13 @@ func passwd(username string, passwords ...string) {
 		return
 	}
 
+	// If no username specified, just output the hash
+	if username == "" {
+		fmt.Println(string(hashedPassword))
+		return
+	}
+
+	// Username specified, store in config
 	_, err = sn.ConfigSetup()
 	if err != nil {
 		slog.Error(fmt.Sprintf("Error loading config: %v", err))
@@ -189,12 +202,8 @@ func main() {
 			Summary: true,
 		}))
 	switch ctx.Command() {
-	case "passwd <username> <password>":
-		slog.Default().Info("setting password")
-		passwd(CLI.Passwd.Username, CLI.Passwd.Password)
-	case "passwd <username>":
-		slog.Default().Info("started Sn serve")
-		passwd(CLI.Passwd.Username)
+	case "passwd", "passwd <password>":
+		passwd(CLI.Passwd.User, CLI.Passwd.Password)
 	case "serve":
 		slog.Default().Info("started Sn serve")
 		serve()

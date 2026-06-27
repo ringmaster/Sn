@@ -2,6 +2,10 @@
 # Execute the Sn command with an environment variable pointing to the file:
 # SN_CONFIG=/my/config.yaml Sn
 #
+# highlight_theme - Chroma syntax highlighting theme for code blocks (see https://xyproto.github.io/splash/docs/)
+highlight_theme: monokai
+# highlight_use_classes - true: emit CSS class names (requires serving chroma CSS); false: inline styles
+highlight_use_classes: false
 # title - The title of the site, usable in templates for output as {title}
 title: Sn
 # subtitle - The subtitle of the site, usable in templates for output as {subtitle}

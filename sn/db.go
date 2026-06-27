@@ -28,6 +28,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/yuin/goldmark"
 	emoji "github.com/yuin/goldmark-emoji"
+	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
 	highlighting "github.com/yuin/goldmark-highlighting/v2"
 	meta "github.com/yuin/goldmark-meta"
 	"github.com/yuin/goldmark/extension"
@@ -394,7 +395,12 @@ func LoadItem(repoName string, repoPath string, filename string) (Item, error) {
 				meta.WithStoresInDocument(),
 			),
 			emoji.Emoji,
-			highlighting.Highlighting,
+			highlighting.NewHighlighting(
+				highlighting.WithStyle(viper.GetString("highlight_theme")),
+				highlighting.WithFormatOptions(
+					chromahtml.WithClasses(viper.GetBool("highlight_use_classes")),
+				),
+			),
 			extension.Typographer,
 			attributes.Extension,
 		),

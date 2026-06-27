@@ -39,6 +39,8 @@ func ConfigSetup() (afero.Fs, error) {
 	viper.SetDefault("activitypub.enabled", false)
 	viper.SetDefault("activitypub.branch", "activitypub-data")
 	viper.SetDefault("activitypub.commit_interval_minutes", 10)
+	viper.SetDefault("highlight_theme", "monokai")
+	viper.SetDefault("highlight_use_classes", false)
 	viper.AddConfigPath("/")
 	viper.AddConfigPath("")
 

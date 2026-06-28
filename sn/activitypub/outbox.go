@@ -26,13 +26,15 @@ type OutboxService struct {
 
 // NewOutboxService creates a new outbox service
 func NewOutboxService(storage *Storage, keyManager *KeyManager, actorService *ActorService, inboxService *InboxService, db *sql.DB) *OutboxService {
-	return &OutboxService{
+	svc := &OutboxService{
 		storage:      storage,
 		keyManager:   keyManager,
 		actorService: actorService,
 		inboxService: inboxService,
 		db:           db,
 	}
+	go svc.retryProcessor()
+	return svc
 }
 
 // HandleOutbox handles outbox collection requests
@@ -340,13 +342,15 @@ func (os *OutboxService) deliverToFollowers(activity *Activity, username string)
 		inboxGroups[inboxURL] = append(inboxGroups[inboxURL], follower)
 	}
 
-	// Deliver to each inbox
+	// Deliver to each inbox, queuing failures for retry
 	successCount := 0
 	for inboxURL, inboxFollowers := range inboxGroups {
 		err := os.deliverToInbox(inboxURL, activityJSON)
 		if err != nil {
-			slog.Error("Failed to deliver to inbox", "inbox", inboxURL, "error", err)
-			// Continue with other inboxes
+			slog.Error("Failed to deliver to inbox, queuing for retry", "inbox", inboxURL, "error", err)
+			if qErr := os.storage.EnqueueFailedDelivery(inboxURL, activityJSON); qErr != nil {
+				slog.Error("Failed to enqueue delivery retry", "inbox", inboxURL, "error", qErr)
+			}
 		} else {
 			successCount += len(inboxFollowers)
 			slog.Info("Successfully delivered to inbox", "inbox", inboxURL, "followers", len(inboxFollowers))
@@ -388,6 +392,48 @@ func (os *OutboxService) deliverToInbox(inboxURL string, activityJSON []byte) er
 	}
 
 	return nil
+}
+
+// retryProcessor runs as a goroutine, periodically retrying failed deliveries
+func (os *OutboxService) retryProcessor() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		os.processRetryQueue()
+	}
+}
+
+func (os *OutboxService) processRetryQueue() {
+	entries, err := os.storage.LoadRetryQueue()
+	if err != nil {
+		slog.Error("Failed to load delivery retry queue", "error", err)
+		return
+	}
+	for _, entry := range entries {
+		if time.Now().Before(entry.NextAttempt) {
+			continue
+		}
+		err := os.deliverToInbox(entry.InboxURL, entry.ActivityJSON)
+		if err != nil {
+			entry.Attempts++
+			if entry.Attempts >= 10 {
+				slog.Warn("Dropping delivery after max retries", "inbox", entry.InboxURL, "attempts", entry.Attempts)
+				_ = os.storage.RemoveRetryEntry(entry.ID)
+				continue
+			}
+			// Exponential backoff: 5m, 10m, 20m, 40m, ... capped at ~8h
+			backoff := time.Duration(5*(1<<entry.Attempts)) * time.Minute
+			if backoff > 8*time.Hour {
+				backoff = 8 * time.Hour
+			}
+			entry.NextAttempt = time.Now().Add(backoff)
+			_ = os.storage.SaveRetryEntry(entry)
+			slog.Info("Rescheduled delivery retry", "inbox", entry.InboxURL, "attempts", entry.Attempts, "next", entry.NextAttempt)
+		} else {
+			slog.Info("Retry delivery succeeded", "inbox", entry.InboxURL, "attempts", entry.Attempts+1)
+			_ = os.storage.RemoveRetryEntry(entry.ID)
+		}
+	}
 }
 
 // Helper functions for outbox implementation

@@ -872,6 +872,86 @@ func (s *Storage) savePublishedPosts(records map[string]PublishedPostRecord) err
 	return nil
 }
 
+// DeliveryQueueEntry represents a failed delivery pending retry
+type DeliveryQueueEntry struct {
+	ID           string    `json:"id"`
+	InboxURL     string    `json:"inboxUrl"`
+	ActivityJSON []byte    `json:"activityJson"`
+	Attempts     int       `json:"attempts"`
+	NextAttempt  time.Time `json:"nextAttempt"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+// EnqueueFailedDelivery stores a failed delivery for later retry
+func (s *Storage) EnqueueFailedDelivery(inboxURL string, activityJSON []byte) error {
+	h := sha256.Sum256(append([]byte(inboxURL+":"), activityJSON...))
+	id := fmt.Sprintf("%x", h[:8])
+
+	entry := &DeliveryQueueEntry{
+		ID:           id,
+		InboxURL:     inboxURL,
+		ActivityJSON: activityJSON,
+		Attempts:     0,
+		NextAttempt:  time.Now().Add(5 * time.Minute),
+		CreatedAt:    time.Now(),
+	}
+	return s.SaveRetryEntry(entry)
+}
+
+// SaveRetryEntry persists a queue entry to storage
+func (s *Storage) SaveRetryEntry(entry *DeliveryQueueEntry) error {
+	data, err := json.MarshalIndent(entry, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal queue entry: %w", err)
+	}
+	filePath := path.Join(".activitypub/queue", entry.ID+".json")
+	if err := afero.WriteFile(s.activityPubFs, filePath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write queue entry: %w", err)
+	}
+	s.markPendingChanges()
+	return nil
+}
+
+// LoadRetryQueue returns all pending delivery queue entries
+func (s *Storage) LoadRetryQueue() ([]*DeliveryQueueEntry, error) {
+	var entries []*DeliveryQueueEntry
+
+	queueDir := ".activitypub/queue"
+	files, err := afero.ReadDir(s.activityPubFs, queueDir)
+	if err != nil {
+		return entries, nil // queue dir may be empty or not exist yet
+	}
+
+	for _, f := range files {
+		if filepath.Ext(f.Name()) != ".json" {
+			continue
+		}
+		data, err := afero.ReadFile(s.activityPubFs, path.Join(queueDir, f.Name()))
+		if err != nil {
+			slog.Warn("Failed to read queue entry", "file", f.Name(), "error", err)
+			continue
+		}
+		var entry DeliveryQueueEntry
+		if err := json.Unmarshal(data, &entry); err != nil {
+			slog.Warn("Failed to parse queue entry", "file", f.Name(), "error", err)
+			continue
+		}
+		entries = append(entries, &entry)
+	}
+	return entries, nil
+}
+
+// RemoveRetryEntry deletes a queue entry after successful delivery or max retries
+func (s *Storage) RemoveRetryEntry(id string) error {
+	filePath := path.Join(".activitypub/queue", id+".json")
+	err := s.activityPubFs.Remove(filePath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove queue entry: %w", err)
+	}
+	s.markPendingChanges()
+	return nil
+}
+
 // mergeFromMain merges content changes from main branch
 func (s *Storage) mergeFromMain() error {
 	// Fetch latest changes

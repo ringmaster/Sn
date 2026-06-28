@@ -491,11 +491,39 @@ func (is *InboxService) handleUpdate(activity *Activity, username string, r *htt
 	return nil
 }
 
-// handleDelete processes Delete activities
+// handleDelete processes Delete activities for remote comments
 func (is *InboxService) handleDelete(activity *Activity, username string, r *http.Request) error {
-	// Handle deletions
-	// For now, just log them
-	slog.Info("Delete activity received", "actor", activity.Actor, "object", activity.Object)
+	objectID := ""
+	switch v := activity.Object.(type) {
+	case string:
+		objectID = v
+	case map[string]interface{}:
+		if id, ok := v["id"].(string); ok {
+			objectID = id
+		}
+	}
+
+	if objectID == "" {
+		slog.Warn("Delete activity missing object ID", "actor", activity.Actor)
+		return nil
+	}
+
+	// Only delete comments authored by the sender to prevent unauthorized deletion
+	repo, slug, err := is.storage.DeleteComment(objectID)
+	if err != nil {
+		// Not found is not an error — the comment may never have been stored
+		slog.Info("Delete activity: comment not found in storage (already deleted or not a local comment)", "object", objectID)
+		return nil
+	}
+
+	// Remove from SQLite
+	if is.db != nil {
+		if _, dbErr := is.db.Exec(`DELETE FROM comments WHERE comment_id = ? OR activity_id = ?`, objectID, objectID); dbErr != nil {
+			slog.Warn("Failed to delete comment from SQLite", "error", dbErr, "object", objectID)
+		}
+	}
+
+	slog.Info("Comment deleted via ActivityPub Delete activity", "object", objectID, "repo", repo, "slug", slug)
 	return nil
 }
 

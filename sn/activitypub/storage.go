@@ -528,6 +528,47 @@ func (s *Storage) SaveComment(comment *Comment) error {
 	return nil
 }
 
+// DeleteComment removes a comment by its ID from git storage.
+// Returns (repo, slug) of the deleted comment so the caller can remove it from SQLite too.
+func (s *Storage) DeleteComment(commentID string) (repo, slug string, err error) {
+	// Walk the comments tree looking for a file whose comment.ID matches
+	commentsRoot := ".activitypub/comments"
+	found := false
+	afero.Walk(s.activityPubFs, commentsRoot, func(filePath string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info.IsDir() || filepath.Ext(filePath) != ".json" {
+			return nil
+		}
+		data, readErr := afero.ReadFile(s.activityPubFs, filePath)
+		if readErr != nil {
+			return nil
+		}
+		var c Comment
+		if json.Unmarshal(data, &c) != nil {
+			return nil
+		}
+		if c.ID == commentID || c.ActivityID == commentID {
+			repo = c.PostRepo
+			slug = c.PostSlug
+			removeErr := s.activityPubFs.Remove(filePath)
+			if removeErr != nil && !os.IsNotExist(removeErr) {
+				err = fmt.Errorf("failed to remove comment file: %w", removeErr)
+			} else {
+				s.markPendingChanges()
+				found = true
+			}
+			return fmt.Errorf("stop") // sentinel to stop Walk
+		}
+		return nil
+	})
+	if err != nil {
+		return
+	}
+	if !found {
+		err = fmt.Errorf("comment not found: %s", commentID)
+	}
+	return
+}
+
 // LoadComments loads comments for a specific post
 func (s *Storage) LoadComments(repo, slug string) ([]*Comment, error) {
 	var comments []*Comment

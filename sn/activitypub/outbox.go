@@ -756,25 +756,112 @@ func (os *OutboxService) handleServerOutboxPage(w http.ResponseWriter, outboxURL
 
 // getTotalServerActivities returns the total count of published activities across all ActivityPub-enabled repos
 func (os *OutboxService) getTotalServerActivities() int {
-	// TODO: Implement actual counting logic that:
-	// 1. Iterates through all configured repos
-	// 2. Checks if each repo has ActivityPub enabled
-	// 3. Counts published articles/activities from those repos
-	// For now, return 0 as placeholder
-	slog.Info("Getting total server activities count", "placeholder", true)
-	return 0
+	repos := viper.GetStringMap("repos")
+	var activityPubRepos []string
+	for repoName := range repos {
+		if isActivityPubEnabledForRepo(repoName) {
+			activityPubRepos = append(activityPubRepos, repoName)
+		}
+	}
+	if len(activityPubRepos) == 0 {
+		return 0
+	}
+
+	placeholders := strings.Repeat("?,", len(activityPubRepos))
+	placeholders = placeholders[:len(placeholders)-1]
+
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM items WHERE repo IN (%s)`, placeholders)
+	args := make([]interface{}, len(activityPubRepos))
+	for i, repo := range activityPubRepos {
+		args[i] = repo
+	}
+
+	var count int
+	if err := os.db.QueryRow(query, args...).Scan(&count); err != nil {
+		slog.Error("Failed to count server activities", "error", err)
+		return 0
+	}
+	return count
 }
 
 // getServerActivitiesForPage returns activities for a page across all ActivityPub-enabled repos
 func (os *OutboxService) getServerActivitiesForPage(pageNum int) []interface{} {
-	// TODO: Implement actual query logic that:
-	// 1. Gets all repos with ActivityPub enabled
-	// 2. Queries published articles from those repos
-	// 3. Converts them to ActivityPub Article objects
-	// 4. Returns the appropriate page of results
-	// For now, return empty slice as placeholder
-	slog.Info("Getting server activities for page", "page", pageNum, "placeholder", true)
-	return []interface{}{}
+	const itemsPerPage = 20
+	offset := (pageNum - 1) * itemsPerPage
+
+	repos := viper.GetStringMap("repos")
+	var activityPubRepos []string
+	for repoName := range repos {
+		if isActivityPubEnabledForRepo(repoName) {
+			activityPubRepos = append(activityPubRepos, repoName)
+		}
+	}
+	if len(activityPubRepos) == 0 {
+		return []interface{}{}
+	}
+
+	placeholders := strings.Repeat("?,", len(activityPubRepos))
+	placeholders = placeholders[:len(placeholders)-1]
+
+	query := fmt.Sprintf(`
+		SELECT DISTINCT items.id, items.repo, items.title, items.slug, items.publishedon, items.html, items.source
+		FROM items
+		WHERE items.repo IN (%s)
+		ORDER BY items.publishedon DESC
+		LIMIT ? OFFSET ?
+	`, placeholders)
+
+	args := make([]interface{}, len(activityPubRepos)+2)
+	for i, repo := range activityPubRepos {
+		args[i] = repo
+	}
+	args[len(activityPubRepos)] = itemsPerPage
+	args[len(activityPubRepos)+1] = offset
+
+	rows, err := os.db.Query(query, args...)
+	if err != nil {
+		slog.Error("Failed to query server activities", "error", err)
+		return []interface{}{}
+	}
+	defer rows.Close()
+
+	var activities []interface{}
+	baseURL := getBaseURL()
+
+	for rows.Next() {
+		var id int64
+		var repo, title, slug, publishedon, html, source string
+		if err := rows.Scan(&id, &repo, &title, &slug, &publishedon, &html, &source); err != nil {
+			slog.Error("Failed to scan server activity row", "error", err)
+			continue
+		}
+
+		postURL := fmt.Sprintf("%s/%s/%s", baseURL, repo, slug)
+		author := getRepoOwner(repo)
+		actorURL := fmt.Sprintf("%s/@%s", baseURL, author)
+
+		article := map[string]interface{}{
+			"id":           postURL,
+			"type":         TypeArticle,
+			"attributedTo": actorURL,
+			"content":      html,
+			"url":          postURL,
+			"published":    publishedon,
+			"to":           []string{"https://www.w3.org/ns/activitystreams#Public"},
+			"cc":           []string{actorURL + "/followers"},
+		}
+		activityID := fmt.Sprintf("%s/activities/%s-%s", baseURL, repo, slug)
+		activity := map[string]interface{}{
+			"@context": ActivityPubContext,
+			"id":       activityID,
+			"type":     TypeCreate,
+			"actor":    actorURL,
+			"object":   article,
+		}
+		activities = append(activities, activity)
+	}
+
+	return activities
 }
 
 func convertTagsToActivityPub(tags []string) []Tag {

@@ -26,13 +26,15 @@ type OutboxService struct {
 
 // NewOutboxService creates a new outbox service
 func NewOutboxService(storage *Storage, keyManager *KeyManager, actorService *ActorService, inboxService *InboxService, db *sql.DB) *OutboxService {
-	return &OutboxService{
+	svc := &OutboxService{
 		storage:      storage,
 		keyManager:   keyManager,
 		actorService: actorService,
 		inboxService: inboxService,
 		db:           db,
 	}
+	go svc.retryProcessor()
+	return svc
 }
 
 // HandleOutbox handles outbox collection requests
@@ -340,13 +342,15 @@ func (os *OutboxService) deliverToFollowers(activity *Activity, username string)
 		inboxGroups[inboxURL] = append(inboxGroups[inboxURL], follower)
 	}
 
-	// Deliver to each inbox
+	// Deliver to each inbox, queuing failures for retry
 	successCount := 0
 	for inboxURL, inboxFollowers := range inboxGroups {
 		err := os.deliverToInbox(inboxURL, activityJSON)
 		if err != nil {
-			slog.Error("Failed to deliver to inbox", "inbox", inboxURL, "error", err)
-			// Continue with other inboxes
+			slog.Error("Failed to deliver to inbox, queuing for retry", "inbox", inboxURL, "error", err)
+			if qErr := os.storage.EnqueueFailedDelivery(inboxURL, activityJSON); qErr != nil {
+				slog.Error("Failed to enqueue delivery retry", "inbox", inboxURL, "error", qErr)
+			}
 		} else {
 			successCount += len(inboxFollowers)
 			slog.Info("Successfully delivered to inbox", "inbox", inboxURL, "followers", len(inboxFollowers))
@@ -388,6 +392,48 @@ func (os *OutboxService) deliverToInbox(inboxURL string, activityJSON []byte) er
 	}
 
 	return nil
+}
+
+// retryProcessor runs as a goroutine, periodically retrying failed deliveries
+func (os *OutboxService) retryProcessor() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		os.processRetryQueue()
+	}
+}
+
+func (os *OutboxService) processRetryQueue() {
+	entries, err := os.storage.LoadRetryQueue()
+	if err != nil {
+		slog.Error("Failed to load delivery retry queue", "error", err)
+		return
+	}
+	for _, entry := range entries {
+		if time.Now().Before(entry.NextAttempt) {
+			continue
+		}
+		err := os.deliverToInbox(entry.InboxURL, entry.ActivityJSON)
+		if err != nil {
+			entry.Attempts++
+			if entry.Attempts >= 10 {
+				slog.Warn("Dropping delivery after max retries", "inbox", entry.InboxURL, "attempts", entry.Attempts)
+				_ = os.storage.RemoveRetryEntry(entry.ID)
+				continue
+			}
+			// Exponential backoff: 5m, 10m, 20m, 40m, ... capped at ~8h
+			backoff := time.Duration(5*(1<<entry.Attempts)) * time.Minute
+			if backoff > 8*time.Hour {
+				backoff = 8 * time.Hour
+			}
+			entry.NextAttempt = time.Now().Add(backoff)
+			_ = os.storage.SaveRetryEntry(entry)
+			slog.Info("Rescheduled delivery retry", "inbox", entry.InboxURL, "attempts", entry.Attempts, "next", entry.NextAttempt)
+		} else {
+			slog.Info("Retry delivery succeeded", "inbox", entry.InboxURL, "attempts", entry.Attempts+1)
+			_ = os.storage.RemoveRetryEntry(entry.ID)
+		}
+	}
 }
 
 // Helper functions for outbox implementation
@@ -710,25 +756,112 @@ func (os *OutboxService) handleServerOutboxPage(w http.ResponseWriter, outboxURL
 
 // getTotalServerActivities returns the total count of published activities across all ActivityPub-enabled repos
 func (os *OutboxService) getTotalServerActivities() int {
-	// TODO: Implement actual counting logic that:
-	// 1. Iterates through all configured repos
-	// 2. Checks if each repo has ActivityPub enabled
-	// 3. Counts published articles/activities from those repos
-	// For now, return 0 as placeholder
-	slog.Info("Getting total server activities count", "placeholder", true)
-	return 0
+	repos := viper.GetStringMap("repos")
+	var activityPubRepos []string
+	for repoName := range repos {
+		if isActivityPubEnabledForRepo(repoName) {
+			activityPubRepos = append(activityPubRepos, repoName)
+		}
+	}
+	if len(activityPubRepos) == 0 {
+		return 0
+	}
+
+	placeholders := strings.Repeat("?,", len(activityPubRepos))
+	placeholders = placeholders[:len(placeholders)-1]
+
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM items WHERE repo IN (%s)`, placeholders)
+	args := make([]interface{}, len(activityPubRepos))
+	for i, repo := range activityPubRepos {
+		args[i] = repo
+	}
+
+	var count int
+	if err := os.db.QueryRow(query, args...).Scan(&count); err != nil {
+		slog.Error("Failed to count server activities", "error", err)
+		return 0
+	}
+	return count
 }
 
 // getServerActivitiesForPage returns activities for a page across all ActivityPub-enabled repos
 func (os *OutboxService) getServerActivitiesForPage(pageNum int) []interface{} {
-	// TODO: Implement actual query logic that:
-	// 1. Gets all repos with ActivityPub enabled
-	// 2. Queries published articles from those repos
-	// 3. Converts them to ActivityPub Article objects
-	// 4. Returns the appropriate page of results
-	// For now, return empty slice as placeholder
-	slog.Info("Getting server activities for page", "page", pageNum, "placeholder", true)
-	return []interface{}{}
+	const itemsPerPage = 20
+	offset := (pageNum - 1) * itemsPerPage
+
+	repos := viper.GetStringMap("repos")
+	var activityPubRepos []string
+	for repoName := range repos {
+		if isActivityPubEnabledForRepo(repoName) {
+			activityPubRepos = append(activityPubRepos, repoName)
+		}
+	}
+	if len(activityPubRepos) == 0 {
+		return []interface{}{}
+	}
+
+	placeholders := strings.Repeat("?,", len(activityPubRepos))
+	placeholders = placeholders[:len(placeholders)-1]
+
+	query := fmt.Sprintf(`
+		SELECT DISTINCT items.id, items.repo, items.title, items.slug, items.publishedon, items.html, items.source
+		FROM items
+		WHERE items.repo IN (%s)
+		ORDER BY items.publishedon DESC
+		LIMIT ? OFFSET ?
+	`, placeholders)
+
+	args := make([]interface{}, len(activityPubRepos)+2)
+	for i, repo := range activityPubRepos {
+		args[i] = repo
+	}
+	args[len(activityPubRepos)] = itemsPerPage
+	args[len(activityPubRepos)+1] = offset
+
+	rows, err := os.db.Query(query, args...)
+	if err != nil {
+		slog.Error("Failed to query server activities", "error", err)
+		return []interface{}{}
+	}
+	defer rows.Close()
+
+	var activities []interface{}
+	baseURL := getBaseURL()
+
+	for rows.Next() {
+		var id int64
+		var repo, title, slug, publishedon, html, source string
+		if err := rows.Scan(&id, &repo, &title, &slug, &publishedon, &html, &source); err != nil {
+			slog.Error("Failed to scan server activity row", "error", err)
+			continue
+		}
+
+		postURL := fmt.Sprintf("%s/%s/%s", baseURL, repo, slug)
+		author := getRepoOwner(repo)
+		actorURL := fmt.Sprintf("%s/@%s", baseURL, author)
+
+		article := map[string]interface{}{
+			"id":           postURL,
+			"type":         TypeArticle,
+			"attributedTo": actorURL,
+			"content":      html,
+			"url":          postURL,
+			"published":    publishedon,
+			"to":           []string{"https://www.w3.org/ns/activitystreams#Public"},
+			"cc":           []string{actorURL + "/followers"},
+		}
+		activityID := fmt.Sprintf("%s/activities/%s-%s", baseURL, repo, slug)
+		activity := map[string]interface{}{
+			"@context": ActivityPubContext,
+			"id":       activityID,
+			"type":     TypeCreate,
+			"actor":    actorURL,
+			"object":   article,
+		}
+		activities = append(activities, activity)
+	}
+
+	return activities
 }
 
 func convertTagsToActivityPub(tags []string) []Tag {
@@ -870,6 +1003,7 @@ func buildFollowersCC(post *BlogPost, baseURL string) []string {
 }
 
 // HandlePostObject handles requests for a post's ActivityPub object representation
+
 func (os *OutboxService) HandlePostObject(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	slug := vars["slug"]
@@ -903,9 +1037,15 @@ func (os *OutboxService) HandlePostObject(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Parse published date for URL building and later use
-	publishedTime, err := time.Parse("2006-01-02 15:04:05", publishedon)
-	if err != nil {
+	// Parse published date — SQLite stores time.Time as RFC3339
+	var publishedTime time.Time
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, publishedon); err == nil {
+			publishedTime = t
+			break
+		}
+	}
+	if publishedTime.IsZero() {
 		publishedTime = time.Now()
 	}
 
@@ -989,16 +1129,33 @@ func (os *OutboxService) HandlePostObject(w http.ResponseWriter, r *http.Request
 		summary = util.GenerateSummaryFromHTML(html)
 	}
 
+	// Strip <head>/<body> wrappers goldmark adds when rendering standalone HTML
+	cleanHTML := html
+	if idx := strings.Index(cleanHTML, "<body>"); idx != -1 {
+		cleanHTML = cleanHTML[idx+6:]
+	}
+	if idx := strings.LastIndex(cleanHTML, "</body>"); idx != -1 {
+		cleanHTML = cleanHTML[:idx]
+	}
+
+	primaryAuthor := getRepoOwner(repo)
+	if len(authors) > 0 {
+		primaryAuthor = authors[0]
+	}
+	actorURL := fmt.Sprintf("%s/@%s", baseURL, primaryAuthor)
+
 	// Build the Article object
 	article := map[string]interface{}{
 		"@context":     ActivityPubContext,
 		"id":           postURL,
 		"type":         "Article",
 		"name":         title,
-		"content":      html,
+		"content":      cleanHTML,
 		"attributedTo": attribution,
 		"published":    publishedTime.Format(time.RFC3339),
 		"url":          postURL,
+		"to":           []string{"https://www.w3.org/ns/activitystreams#Public"},
+		"cc":           []string{actorURL + "/followers"},
 	}
 
 	if summary != "" {

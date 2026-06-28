@@ -71,12 +71,7 @@ func (as *ActorService) HandleWebfinger(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Build URLs
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-
+	scheme := getScheme(r)
 	actorURL := fmt.Sprintf("%s://%s/@%s", scheme, domain, username)
 	profileURL := fmt.Sprintf("%s://%s/", scheme, domain)
 
@@ -149,10 +144,7 @@ func (as *ActorService) HandleActor(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 
 	// Build base URLs
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
+	scheme := getScheme(r)
 	baseURL := fmt.Sprintf("%s://%s", scheme, r.Host)
 	actorURL := fmt.Sprintf("%s/@%s", baseURL, username)
 
@@ -363,7 +355,16 @@ func isActivityPubEnabled() bool {
 	return enabled
 }
 
+// getScheme returns the public-facing scheme. Behind a reverse proxy r.TLS is
+// nil even for HTTPS traffic, so prefer the configured rooturl, then
+// X-Forwarded-Proto, and fall back to r.TLS only as a last resort.
 func getScheme(r *http.Request) string {
+	if base := getBaseURL(); strings.HasPrefix(base, "https://") {
+		return "https"
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
+		return "https"
+	}
 	if r.TLS != nil {
 		return "https"
 	}

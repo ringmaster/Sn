@@ -12,7 +12,6 @@ import (
 	gitHttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/gorilla/mux"
-	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 )
 
@@ -67,20 +66,6 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 		slog.Error(fmt.Sprintf("Git Worktree: %#v\n", err))
 	}
 
-	// Get list of files BEFORE git pull to detect new files for ActivityPub
-	existingFiles := make(map[string]bool)
-	for repoName := range viper.GetStringMap("repos") {
-		repoPath := ConfigPath(fmt.Sprintf("repos.%s.path", repoName))
-		if exists, err := afero.DirExists(Vfs, repoPath); err == nil && exists {
-			afero.Walk(Vfs, repoPath, func(path string, info os.FileInfo, _ error) error {
-				if !info.IsDir() && filepath.Ext(path) == ".md" {
-					existingFiles[path] = true
-				}
-				return nil
-			})
-		}
-	}
-
 	err = worktree.Pull(pullops)
 	if err != nil {
 		slog.Error(fmt.Sprintf("Git PullOptions: %#v\n", err))
@@ -93,39 +78,9 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 	// After git pull, reload repositories to pick up new files
 	slog.Info("Webhook: reloading repositories after git pull")
 
-	// Reload repositories
+	// DBLoadRepos triggers reloadItem for each file, which consults the ActivityPub
+	// high-water mark and handles Publish vs Update automatically.
 	DBLoadRepos()
-
-	// Check for new files and trigger ActivityPub for them
-	if ActivityPubManager != nil {
-		for repoName := range viper.GetStringMap("repos") {
-			repoPath := ConfigPath(fmt.Sprintf("repos.%s.path", repoName))
-			if exists, err := afero.DirExists(Vfs, repoPath); err == nil && exists {
-				afero.Walk(Vfs, repoPath, func(path string, info os.FileInfo, _ error) error {
-					if !info.IsDir() && filepath.Ext(path) == ".md" {
-						// If this file wasn't in our existing files list, it's new
-						if !existingFiles[path] {
-							slog.Info("Webhook detected new file", "file", path, "repo", repoName)
-							// Load the item and publish to ActivityPub
-							item, err := LoadItem(repoName, repoPath, path)
-							if err == nil {
-								blogPost := ConvertItemToBlogPost(item)
-								if blogPost != nil {
-									err := ActivityPubManager.PublishPost(blogPost)
-									if err != nil {
-										slog.Error("Failed to publish webhook file to ActivityPub", "error", err, "file", path)
-									} else {
-										slog.Info("Published webhook file to ActivityPub", "file", path, "title", item.Title)
-									}
-								}
-							}
-						}
-					}
-					return nil
-				})
-			}
-		}
-	}
 
 	w.Header().Add("Content-Type", "text/plain")
 	w.Header().Add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")

@@ -59,23 +59,19 @@ func (is *InboxService) HandleInbox(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// Verify HTTP signature if present
+	// Verify HTTP signature — required for all incoming activities
 	if signatureHeader := r.Header.Get("Signature"); signatureHeader != "" {
-		// Log signature details for debugging
-		slog.Info("Processing HTTP signature", "signature_header", signatureHeader, "remote_addr", r.RemoteAddr)
-		slog.Info("Request headers for signature verification", "host", r.Header.Get("Host"), "date", r.Header.Get("Date"), "digest", r.Header.Get("Digest"), "user_agent", r.Header.Get("User-Agent"))
 		err = is.verifyIncomingSignature(r, body)
 		if err != nil {
 			slog.Warn("HTTP signature verification failed", "error", err, "remote_addr", r.RemoteAddr)
-			// Don't fail on signature verification for now - just log and continue
-			slog.Warn("Continuing without signature verification for debugging purposes")
-		} else {
-			slog.Info("HTTP signature verified successfully")
+			http.Error(w, "Invalid signature", http.StatusUnauthorized)
+			return
 		}
+		slog.Info("HTTP signature verified", "remote_addr", r.RemoteAddr)
 	} else {
-		slog.Warn("No HTTP signature found in request", "remote_addr", r.RemoteAddr)
-		// For now, we'll accept unsigned requests but log them
-		// In production, you might want to reject unsigned requests
+		slog.Warn("Rejected unsigned ActivityPub request", "remote_addr", r.RemoteAddr)
+		http.Error(w, "Signature required", http.StatusUnauthorized)
+		return
 	}
 
 	// Parse the activity
@@ -373,10 +369,11 @@ func (is *InboxService) handleCreateNote(activity *Activity, objectMap map[strin
 		return nil
 	}
 
-	// Parse the reply URL to determine if it's for one of our posts
-	postRepo, postSlug := parsePostURLForReply(inReplyTo, r)
+	// Walk the inReplyTo chain to find the local post this thread belongs to.
+	// A reply-to-reply has inReplyTo pointing to a remote comment, not a local post URL.
+	postRepo, postSlug := is.resolvePostForNote(inReplyTo, r)
 	if postRepo == "" || postSlug == "" {
-		// Not a reply to our content
+		// Not rooted in our content
 		return nil
 	}
 
@@ -495,11 +492,39 @@ func (is *InboxService) handleUpdate(activity *Activity, username string, r *htt
 	return nil
 }
 
-// handleDelete processes Delete activities
+// handleDelete processes Delete activities for remote comments
 func (is *InboxService) handleDelete(activity *Activity, username string, r *http.Request) error {
-	// Handle deletions
-	// For now, just log them
-	slog.Info("Delete activity received", "actor", activity.Actor, "object", activity.Object)
+	objectID := ""
+	switch v := activity.Object.(type) {
+	case string:
+		objectID = v
+	case map[string]interface{}:
+		if id, ok := v["id"].(string); ok {
+			objectID = id
+		}
+	}
+
+	if objectID == "" {
+		slog.Warn("Delete activity missing object ID", "actor", activity.Actor)
+		return nil
+	}
+
+	// Only delete comments authored by the sender to prevent unauthorized deletion
+	repo, slug, err := is.storage.DeleteComment(objectID)
+	if err != nil {
+		// Not found is not an error — the comment may never have been stored
+		slog.Info("Delete activity: comment not found in storage (already deleted or not a local comment)", "object", objectID)
+		return nil
+	}
+
+	// Remove from SQLite
+	if is.db != nil {
+		if _, dbErr := is.db.Exec(`DELETE FROM comments WHERE comment_id = ? OR activity_id = ?`, objectID, objectID); dbErr != nil {
+			slog.Warn("Failed to delete comment from SQLite", "error", dbErr, "object", objectID)
+		}
+	}
+
+	slog.Info("Comment deleted via ActivityPub Delete activity", "object", objectID, "repo", repo, "slug", slug)
 	return nil
 }
 
@@ -656,6 +681,80 @@ func extractDomainFromActorID(actorID string) string {
 	return u.Host
 }
 
+// resolvePostForNote walks the inReplyTo chain (up to 10 hops) to find the
+// local post that a note is ultimately a reply to. Returns repo and slug.
+func (is *InboxService) resolvePostForNote(inReplyTo string, r *http.Request) (string, string) {
+	const maxDepth = 10
+	visited := make(map[string]bool)
+
+	current := inReplyTo
+	for depth := 0; depth < maxDepth; depth++ {
+		if current == "" || visited[current] {
+			break
+		}
+		visited[current] = true
+
+		// Check if this URL is one of our local posts
+		repo, slug := parsePostURLForReply(current, r)
+		if repo != "" && slug != "" {
+			return repo, slug
+		}
+
+		// Check if it's a local comment we already stored (fast path, no HTTP)
+		if is.db != nil {
+			var parentReplyTo string
+			err := is.db.QueryRow(
+				`SELECT in_reply_to FROM comments WHERE comment_id = ?`, current,
+			).Scan(&parentReplyTo)
+			if err == nil {
+				// Found a stored comment — follow its inReplyTo
+				current = parentReplyTo
+				continue
+			}
+		}
+
+		// Fetch the remote object and follow its inReplyTo
+		obj, err := is.fetchObject(current)
+		if err != nil {
+			slog.Warn("Failed to fetch inReplyTo object while resolving thread", "url", current, "error", err)
+			break
+		}
+		next, _ := obj["inReplyTo"].(string)
+		if next == "" {
+			break
+		}
+		current = next
+	}
+	return "", ""
+}
+
+// fetchObject fetches an ActivityPub object by URL and returns it as a map
+func (is *InboxService) fetchObject(objectURL string) (map[string]interface{}, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET", objectURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/activity+json, application/ld+json")
+	req.Header.Set("User-Agent", "Sn/1.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %d fetching %s", resp.StatusCode, objectURL)
+	}
+
+	var obj map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&obj); err != nil {
+		return nil, err
+	}
+	return obj, nil
+}
+
 func parsePostURLForReply(inReplyTo string, r *http.Request) (string, string) {
 	// Parse the URL to see if it matches our post URL pattern
 	// Expected pattern: https://domain.com/repo/slug or similar
@@ -719,6 +818,9 @@ func (is *InboxService) processSharedInboxActivity(activity *Activity, r *http.R
 				}
 			}
 		}
+	case TypeCreate, TypeUpdate, TypeDelete, TypeLike, TypeAnnounce:
+		// Content activities aren't addressed to a specific user — route to primary user
+		targetUsername = getPrimaryUser()
 	default:
 		slog.Info("Shared inbox activity type not specifically handled", "type", activity.Type)
 		return nil

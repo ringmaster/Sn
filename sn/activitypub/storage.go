@@ -528,6 +528,47 @@ func (s *Storage) SaveComment(comment *Comment) error {
 	return nil
 }
 
+// DeleteComment removes a comment by its ID from git storage.
+// Returns (repo, slug) of the deleted comment so the caller can remove it from SQLite too.
+func (s *Storage) DeleteComment(commentID string) (repo, slug string, err error) {
+	// Walk the comments tree looking for a file whose comment.ID matches
+	commentsRoot := ".activitypub/comments"
+	found := false
+	afero.Walk(s.activityPubFs, commentsRoot, func(filePath string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info.IsDir() || filepath.Ext(filePath) != ".json" {
+			return nil
+		}
+		data, readErr := afero.ReadFile(s.activityPubFs, filePath)
+		if readErr != nil {
+			return nil
+		}
+		var c Comment
+		if json.Unmarshal(data, &c) != nil {
+			return nil
+		}
+		if c.ID == commentID || c.ActivityID == commentID {
+			repo = c.PostRepo
+			slug = c.PostSlug
+			removeErr := s.activityPubFs.Remove(filePath)
+			if removeErr != nil && !os.IsNotExist(removeErr) {
+				err = fmt.Errorf("failed to remove comment file: %w", removeErr)
+			} else {
+				s.markPendingChanges()
+				found = true
+			}
+			return fmt.Errorf("stop") // sentinel to stop Walk
+		}
+		return nil
+	})
+	if err != nil {
+		return
+	}
+	if !found {
+		err = fmt.Errorf("comment not found: %s", commentID)
+	}
+	return
+}
+
 // LoadComments loads comments for a specific post
 func (s *Storage) LoadComments(repo, slug string) ([]*Comment, error) {
 	var comments []*Comment
@@ -803,6 +844,153 @@ func (s *Storage) decrypt(encodedData []byte) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+// publishedPostKey returns a stable key for a repo+slug pair
+func publishedPostKey(repo, slug string) string {
+	h := sha256.Sum256([]byte(repo + ":" + slug))
+	return fmt.Sprintf("%x", h)
+}
+
+// PublishedPostRecord stores metadata about a post that has been federated
+type PublishedPostRecord struct {
+	PostURL     string    `json:"postUrl"`
+	PublishedAt time.Time `json:"publishedAt"`
+}
+
+// IsPostPublished returns true if the repo+slug has already been sent to followers
+func (s *Storage) IsPostPublished(repo, slug string) (bool, error) {
+	records, err := s.loadPublishedPosts()
+	if err != nil {
+		return false, err
+	}
+	_, exists := records[publishedPostKey(repo, slug)]
+	return exists, nil
+}
+
+// MarkPostPublished records that a post has been federated
+func (s *Storage) MarkPostPublished(repo, slug, postURL string, publishedAt time.Time) error {
+	records, err := s.loadPublishedPosts()
+	if err != nil {
+		return err
+	}
+	records[publishedPostKey(repo, slug)] = PublishedPostRecord{
+		PostURL:     postURL,
+		PublishedAt: publishedAt,
+	}
+	return s.savePublishedPosts(records)
+}
+
+func (s *Storage) loadPublishedPosts() (map[string]PublishedPostRecord, error) {
+	records := make(map[string]PublishedPostRecord)
+	filePath := ".activitypub/published_posts.json"
+
+	exists, err := afero.Exists(s.activityPubFs, filePath)
+	if err != nil || !exists {
+		return records, err
+	}
+
+	data, err := afero.ReadFile(s.activityPubFs, filePath)
+	if err != nil {
+		return records, fmt.Errorf("failed to read published posts file: %w", err)
+	}
+
+	if err := json.Unmarshal(data, &records); err != nil {
+		return records, fmt.Errorf("failed to unmarshal published posts: %w", err)
+	}
+	return records, nil
+}
+
+func (s *Storage) savePublishedPosts(records map[string]PublishedPostRecord) error {
+	data, err := json.MarshalIndent(records, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal published posts: %w", err)
+	}
+	if err := afero.WriteFile(s.activityPubFs, ".activitypub/published_posts.json", data, 0644); err != nil {
+		return fmt.Errorf("failed to write published posts file: %w", err)
+	}
+	s.markPendingChanges()
+	return nil
+}
+
+// DeliveryQueueEntry represents a failed delivery pending retry
+type DeliveryQueueEntry struct {
+	ID           string    `json:"id"`
+	InboxURL     string    `json:"inboxUrl"`
+	ActivityJSON []byte    `json:"activityJson"`
+	Attempts     int       `json:"attempts"`
+	NextAttempt  time.Time `json:"nextAttempt"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+// EnqueueFailedDelivery stores a failed delivery for later retry
+func (s *Storage) EnqueueFailedDelivery(inboxURL string, activityJSON []byte) error {
+	h := sha256.Sum256(append([]byte(inboxURL+":"), activityJSON...))
+	id := fmt.Sprintf("%x", h[:8])
+
+	entry := &DeliveryQueueEntry{
+		ID:           id,
+		InboxURL:     inboxURL,
+		ActivityJSON: activityJSON,
+		Attempts:     0,
+		NextAttempt:  time.Now().Add(5 * time.Minute),
+		CreatedAt:    time.Now(),
+	}
+	return s.SaveRetryEntry(entry)
+}
+
+// SaveRetryEntry persists a queue entry to storage
+func (s *Storage) SaveRetryEntry(entry *DeliveryQueueEntry) error {
+	data, err := json.MarshalIndent(entry, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal queue entry: %w", err)
+	}
+	filePath := path.Join(".activitypub/queue", entry.ID+".json")
+	if err := afero.WriteFile(s.activityPubFs, filePath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write queue entry: %w", err)
+	}
+	s.markPendingChanges()
+	return nil
+}
+
+// LoadRetryQueue returns all pending delivery queue entries
+func (s *Storage) LoadRetryQueue() ([]*DeliveryQueueEntry, error) {
+	var entries []*DeliveryQueueEntry
+
+	queueDir := ".activitypub/queue"
+	files, err := afero.ReadDir(s.activityPubFs, queueDir)
+	if err != nil {
+		return entries, nil // queue dir may be empty or not exist yet
+	}
+
+	for _, f := range files {
+		if filepath.Ext(f.Name()) != ".json" {
+			continue
+		}
+		data, err := afero.ReadFile(s.activityPubFs, path.Join(queueDir, f.Name()))
+		if err != nil {
+			slog.Warn("Failed to read queue entry", "file", f.Name(), "error", err)
+			continue
+		}
+		var entry DeliveryQueueEntry
+		if err := json.Unmarshal(data, &entry); err != nil {
+			slog.Warn("Failed to parse queue entry", "file", f.Name(), "error", err)
+			continue
+		}
+		entries = append(entries, &entry)
+	}
+	return entries, nil
+}
+
+// RemoveRetryEntry deletes a queue entry after successful delivery or max retries
+func (s *Storage) RemoveRetryEntry(id string) error {
+	filePath := path.Join(".activitypub/queue", id+".json")
+	err := s.activityPubFs.Remove(filePath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove queue entry: %w", err)
+	}
+	s.markPendingChanges()
+	return nil
 }
 
 // mergeFromMain merges content changes from main branch

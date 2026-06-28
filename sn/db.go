@@ -291,9 +291,7 @@ func DBLoadRepo(repoName string) {
 
 func reloadItem(repoName string, repoPath string, filename string) (Item, error) {
 	var item_id int64
-	isUpdate := false
 	if err := db.QueryRow("SELECT id FROM items WHERE repo = ? and source = ?", repoName, filename).Scan(&item_id); err == nil && item_id > 0 {
-		isUpdate = true
 		db.Exec("DELETE FROM items_tags WHERE item_id = ?", item_id)
 		db.Exec("DELETE FROM items_authors WHERE item_id = ?", item_id)
 		db.Exec("DELETE FROM frontmatter WHERE item_id = ?", item_id)
@@ -308,10 +306,12 @@ func reloadItem(repoName string, repoPath string, filename string) (Item, error)
 
 		// Publish to ActivityPub if enabled and this is an ActivityPub-enabled repo
 		if ActivityPubManager != nil {
-			// Convert Item to BlogPost for ActivityPub
 			blogPost := ConvertItemToBlogPost(item)
 			if blogPost != nil {
-				if isUpdate {
+				alreadyPublished, err := ActivityPubManager.IsPostPublished(item.Repo, item.Slug)
+				if err != nil {
+					slog.Warn("Failed to check ActivityPub publish state, skipping federation", "error", err, "slug", item.Slug)
+				} else if alreadyPublished {
 					err := ActivityPubManager.UpdatePost(blogPost)
 					if err != nil {
 						slog.Error("Failed to update post on ActivityPub", "error", err, "title", item.Title, "repo", repoName)
@@ -324,6 +324,9 @@ func reloadItem(repoName string, repoPath string, filename string) (Item, error)
 						slog.Error("Failed to publish post to ActivityPub", "error", err, "title", item.Title, "repo", repoName)
 					} else {
 						slog.Info("Post published to ActivityPub", "title", item.Title, "repo", repoName)
+						if markErr := ActivityPubManager.MarkPostPublished(item.Repo, item.Slug, blogPost.URL, item.Date); markErr != nil {
+							slog.Warn("Failed to record ActivityPub publish state", "error", markErr, "slug", item.Slug)
+						}
 					}
 				}
 			}

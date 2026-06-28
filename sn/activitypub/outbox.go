@@ -1122,16 +1122,33 @@ func (os *OutboxService) HandlePostObject(w http.ResponseWriter, r *http.Request
 		summary = util.GenerateSummaryFromHTML(html)
 	}
 
+	// Strip <head>/<body> wrappers goldmark adds when rendering standalone HTML
+	cleanHTML := html
+	if idx := strings.Index(cleanHTML, "<body>"); idx != -1 {
+		cleanHTML = cleanHTML[idx+6:]
+	}
+	if idx := strings.LastIndex(cleanHTML, "</body>"); idx != -1 {
+		cleanHTML = cleanHTML[:idx]
+	}
+
+	primaryAuthor := getRepoOwner(repo)
+	if len(authors) > 0 {
+		primaryAuthor = authors[0]
+	}
+	actorURL := fmt.Sprintf("%s/@%s", baseURL, primaryAuthor)
+
 	// Build the Article object
 	article := map[string]interface{}{
 		"@context":     ActivityPubContext,
 		"id":           postURL,
 		"type":         "Article",
 		"name":         title,
-		"content":      html,
+		"content":      cleanHTML,
 		"attributedTo": attribution,
 		"published":    publishedTime.Format(time.RFC3339),
 		"url":          postURL,
+		"to":           []string{"https://www.w3.org/ns/activitystreams#Public"},
+		"cc":           []string{actorURL + "/followers"},
 	}
 
 	if summary != "" {

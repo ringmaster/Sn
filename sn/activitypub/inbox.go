@@ -743,6 +743,9 @@ func (is *InboxService) processSharedInboxActivity(activity *Activity, r *http.R
 				}
 			}
 		}
+	case TypeCreate, TypeUpdate, TypeDelete, TypeLike, TypeAnnounce:
+		// Content activities aren't addressed to a specific user — route to primary user
+		targetUsername = getPrimaryUser()
 	default:
 		slog.Info("Shared inbox activity type not specifically handled", "type", activity.Type)
 		return nil

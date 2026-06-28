@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/ringmaster/Sn/sn/util"
@@ -240,6 +241,22 @@ func (m *Manager) DeletePost(postURL, repo string) error {
 
 	baseURL := getBaseURL()
 	return m.outboxService.DeletePost(postURL, repo, baseURL)
+}
+
+// IsPostPublished checks the persistent high-water mark to see if a post has been federated
+func (m *Manager) IsPostPublished(repo, slug string) (bool, error) {
+	if !m.enabled {
+		return false, nil
+	}
+	return m.storage.IsPostPublished(repo, slug)
+}
+
+// MarkPostPublished records that a post has been successfully federated
+func (m *Manager) MarkPostPublished(repo, slug, postURL string, publishedAt time.Time) error {
+	if !m.enabled {
+		return nil
+	}
+	return m.storage.MarkPostPublished(repo, slug, postURL, publishedAt)
 }
 
 // GetComments returns comments for a specific post

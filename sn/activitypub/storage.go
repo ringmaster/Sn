@@ -805,6 +805,73 @@ func (s *Storage) decrypt(encodedData []byte) ([]byte, error) {
 	return data, nil
 }
 
+// publishedPostKey returns a stable key for a repo+slug pair
+func publishedPostKey(repo, slug string) string {
+	h := sha256.Sum256([]byte(repo + ":" + slug))
+	return fmt.Sprintf("%x", h)
+}
+
+// PublishedPostRecord stores metadata about a post that has been federated
+type PublishedPostRecord struct {
+	PostURL     string    `json:"postUrl"`
+	PublishedAt time.Time `json:"publishedAt"`
+}
+
+// IsPostPublished returns true if the repo+slug has already been sent to followers
+func (s *Storage) IsPostPublished(repo, slug string) (bool, error) {
+	records, err := s.loadPublishedPosts()
+	if err != nil {
+		return false, err
+	}
+	_, exists := records[publishedPostKey(repo, slug)]
+	return exists, nil
+}
+
+// MarkPostPublished records that a post has been federated
+func (s *Storage) MarkPostPublished(repo, slug, postURL string, publishedAt time.Time) error {
+	records, err := s.loadPublishedPosts()
+	if err != nil {
+		return err
+	}
+	records[publishedPostKey(repo, slug)] = PublishedPostRecord{
+		PostURL:     postURL,
+		PublishedAt: publishedAt,
+	}
+	return s.savePublishedPosts(records)
+}
+
+func (s *Storage) loadPublishedPosts() (map[string]PublishedPostRecord, error) {
+	records := make(map[string]PublishedPostRecord)
+	filePath := ".activitypub/published_posts.json"
+
+	exists, err := afero.Exists(s.activityPubFs, filePath)
+	if err != nil || !exists {
+		return records, err
+	}
+
+	data, err := afero.ReadFile(s.activityPubFs, filePath)
+	if err != nil {
+		return records, fmt.Errorf("failed to read published posts file: %w", err)
+	}
+
+	if err := json.Unmarshal(data, &records); err != nil {
+		return records, fmt.Errorf("failed to unmarshal published posts: %w", err)
+	}
+	return records, nil
+}
+
+func (s *Storage) savePublishedPosts(records map[string]PublishedPostRecord) error {
+	data, err := json.MarshalIndent(records, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal published posts: %w", err)
+	}
+	if err := afero.WriteFile(s.activityPubFs, ".activitypub/published_posts.json", data, 0644); err != nil {
+		return fmt.Errorf("failed to write published posts file: %w", err)
+	}
+	s.markPendingChanges()
+	return nil
+}
+
 // mergeFromMain merges content changes from main branch
 func (s *Storage) mergeFromMain() error {
 	// Fetch latest changes

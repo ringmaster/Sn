@@ -158,19 +158,19 @@ func (m *Manager) RegisterRoutes(router *mux.Router) {
 		Methods("GET").
 		Name("activitypub-following")
 
-	// Post object endpoints (for ActivityPub content negotiation)
-	// Register handlers for all routes that serve posts with slugs
+	// Post object endpoints (for ActivityPub content negotiation).
+	// gorilla mux Headers() requires an exact header value match, but Mastodon
+	// sends a multi-value Accept header, so we use MatcherFunc for substring matching.
 	postPatterns := util.GetAllPostRoutePatterns()
 	for i, pattern := range postPatterns {
 		router.HandleFunc(pattern, m.outboxService.HandlePostObject).
 			Methods("GET").
-			Headers("Accept", "application/activity+json").
+			MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
+				accept := r.Header.Get("Accept")
+				return strings.Contains(accept, "application/activity+json") ||
+					strings.Contains(accept, "application/ld+json")
+			}).
 			Name(fmt.Sprintf("activitypub-post-%d", i))
-
-		router.HandleFunc(pattern, m.outboxService.HandlePostObject).
-			Methods("GET").
-			Headers("Accept", "application/ld+json").
-			Name(fmt.Sprintf("activitypub-post-ld-%d", i))
 	}
 
 	slog.Info("ActivityPub routes registered successfully")

@@ -1003,6 +1003,7 @@ func buildFollowersCC(post *BlogPost, baseURL string) []string {
 }
 
 // HandlePostObject handles requests for a post's ActivityPub object representation
+
 func (os *OutboxService) HandlePostObject(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	slug := vars["slug"]

@@ -1036,9 +1036,15 @@ func (os *OutboxService) HandlePostObject(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Parse published date for URL building and later use
-	publishedTime, err := time.Parse("2006-01-02 15:04:05", publishedon)
-	if err != nil {
+	// Parse published date — SQLite stores time.Time as RFC3339
+	var publishedTime time.Time
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, publishedon); err == nil {
+			publishedTime = t
+			break
+		}
+	}
+	if publishedTime.IsZero() {
 		publishedTime = time.Now()
 	}
 

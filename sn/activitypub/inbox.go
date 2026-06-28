@@ -369,10 +369,11 @@ func (is *InboxService) handleCreateNote(activity *Activity, objectMap map[strin
 		return nil
 	}
 
-	// Parse the reply URL to determine if it's for one of our posts
-	postRepo, postSlug := parsePostURLForReply(inReplyTo, r)
+	// Walk the inReplyTo chain to find the local post this thread belongs to.
+	// A reply-to-reply has inReplyTo pointing to a remote comment, not a local post URL.
+	postRepo, postSlug := is.resolvePostForNote(inReplyTo, r)
 	if postRepo == "" || postSlug == "" {
-		// Not a reply to our content
+		// Not rooted in our content
 		return nil
 	}
 
@@ -678,6 +679,80 @@ func extractDomainFromActorID(actorID string) string {
 		return ""
 	}
 	return u.Host
+}
+
+// resolvePostForNote walks the inReplyTo chain (up to 10 hops) to find the
+// local post that a note is ultimately a reply to. Returns repo and slug.
+func (is *InboxService) resolvePostForNote(inReplyTo string, r *http.Request) (string, string) {
+	const maxDepth = 10
+	visited := make(map[string]bool)
+
+	current := inReplyTo
+	for depth := 0; depth < maxDepth; depth++ {
+		if current == "" || visited[current] {
+			break
+		}
+		visited[current] = true
+
+		// Check if this URL is one of our local posts
+		repo, slug := parsePostURLForReply(current, r)
+		if repo != "" && slug != "" {
+			return repo, slug
+		}
+
+		// Check if it's a local comment we already stored (fast path, no HTTP)
+		if is.db != nil {
+			var parentReplyTo string
+			err := is.db.QueryRow(
+				`SELECT in_reply_to FROM comments WHERE comment_id = ?`, current,
+			).Scan(&parentReplyTo)
+			if err == nil {
+				// Found a stored comment — follow its inReplyTo
+				current = parentReplyTo
+				continue
+			}
+		}
+
+		// Fetch the remote object and follow its inReplyTo
+		obj, err := is.fetchObject(current)
+		if err != nil {
+			slog.Warn("Failed to fetch inReplyTo object while resolving thread", "url", current, "error", err)
+			break
+		}
+		next, _ := obj["inReplyTo"].(string)
+		if next == "" {
+			break
+		}
+		current = next
+	}
+	return "", ""
+}
+
+// fetchObject fetches an ActivityPub object by URL and returns it as a map
+func (is *InboxService) fetchObject(objectURL string) (map[string]interface{}, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET", objectURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/activity+json, application/ld+json")
+	req.Header.Set("User-Agent", "Sn/1.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %d fetching %s", resp.StatusCode, objectURL)
+	}
+
+	var obj map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&obj); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 func parsePostURLForReply(inReplyTo string, r *http.Request) (string, string) {

@@ -71,9 +71,16 @@ func (as *ActorService) HandleWebfinger(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Build URLs
+	// Build URLs — derive scheme from configured rooturl, falling back to
+	// X-Forwarded-Proto (set by Caddy), then r.TLS. Never inspect r.TLS alone
+	// since the app runs behind a reverse proxy on plain HTTP internally.
+	baseURL := getBaseURL()
 	scheme := "http"
-	if r.TLS != nil {
+	if strings.HasPrefix(baseURL, "https://") {
+		scheme = "https"
+	} else if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
+		scheme = "https"
+	} else if r.TLS != nil {
 		scheme = "https"
 	}
 
